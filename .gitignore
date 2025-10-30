@@ -29,7 +29,7 @@ yarn-error.log*
 .env
 venv/
 __pycache__/
-*.pdf
+#*.pdf
 *db-journal
 *.bak
 *.svg
