@@ -7,6 +7,8 @@
   --stud: #3a7bd5;
   --plate: #f39c12;
   --blocking: #16a085;
+  --sheathing: #c49b66;
+  --nail-row: #d35400;
 }
 
 * {
@@ -135,6 +137,14 @@ body {
 
 .legend .swatch.blocking {
   background: var(--blocking);
+}
+
+.legend .swatch.sheathing {
+  background: var(--sheathing);
+}
+
+.legend .swatch.nail-row {
+  background: var(--nail-row);
 }
 
 .legend-hint {

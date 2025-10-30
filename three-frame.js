@@ -49,25 +49,77 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
 dirLight.position.set(1.5, 2.5, 3.5);
 scene.add(dirLight);
 
-const frameGroup = new THREE.Group();
-scene.add(frameGroup);
+const modelGroup = new THREE.Group();
+scene.add(modelGroup);
+
+const groups = {
+  framing: new THREE.Group(),
+  sheathing: new THREE.Group(),
+  nailRows: new THREE.Group()
+};
+
+modelGroup.add(groups.framing, groups.sheathing, groups.nailRows);
 
 const materials = {
   stud: new THREE.MeshStandardMaterial({ color: 0x3a7bd5, metalness: 0.04, roughness: 0.62 }),
   blocking: new THREE.MeshStandardMaterial({ color: 0x16a085, metalness: 0.03, roughness: 0.58 }),
-  plate: new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.08, roughness: 0.55 })
+  plate: new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.08, roughness: 0.55 }),
+  sheathing: new THREE.MeshStandardMaterial({
+    color: 0xc49b66,
+    metalness: 0.04,
+    roughness: 0.78,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide
+  }),
+  nailRow: new THREE.MeshStandardMaterial({ color: 0xd35400, metalness: 0.12, roughness: 0.45, side: THREE.DoubleSide })
 };
 
 const highlightMaterials = {
   stud: materials.stud.clone(),
   blocking: materials.blocking.clone(),
-  plate: materials.plate.clone()
+  plate: materials.plate.clone(),
+  sheathing: materials.sheathing.clone(),
+  nailRow: materials.nailRow.clone()
 };
 
 Object.values(highlightMaterials).forEach(mat => {
   mat.emissive.setHex(0xffffff);
   mat.emissiveIntensity = 0.28;
 });
+
+function createNailMarkerGeometry() {
+  const size = 1;
+  const armRatio = 0.2;
+  const half = size / 2;
+  const barHalf = (size * armRatio) / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-barHalf, half);
+  shape.lineTo(barHalf, half);
+  shape.lineTo(barHalf, barHalf);
+  shape.lineTo(half, barHalf);
+  shape.lineTo(half, -barHalf);
+  shape.lineTo(barHalf, -barHalf);
+  shape.lineTo(barHalf, -half);
+  shape.lineTo(-barHalf, -half);
+  shape.lineTo(-barHalf, -barHalf);
+  shape.lineTo(-half, -barHalf);
+  shape.lineTo(-half, barHalf);
+  shape.lineTo(-barHalf, barHalf);
+  shape.closePath();
+  const geometry = new THREE.ShapeGeometry(shape);
+  geometry.center();
+  return geometry;
+}
+
+const nailMarkerGeometry = createNailMarkerGeometry();
+
+const tempMatrix = new THREE.Matrix4();
+const tempVector = new THREE.Vector3();
+const tempVector2 = new THREE.Vector3();
+const tempVector3 = new THREE.Vector3();
+const tempQuaternion = new THREE.Quaternion();
+const tempScale = new THREE.Vector3();
 
 let cachedDimensions = {
   width: 1,
@@ -76,13 +128,13 @@ let cachedDimensions = {
   cameraDistance: 10
 };
 
-function clearFrameGroup() {
-  for (let i = frameGroup.children.length - 1; i >= 0; i -= 1) {
-    const child = frameGroup.children[i];
-    if (child.geometry) {
+function clearGroup(group) {
+  for (let i = group.children.length - 1; i >= 0; i -= 1) {
+    const child = group.children[i];
+    if (!child.isInstancedMesh && child.geometry) {
       child.geometry.dispose();
     }
-    frameGroup.remove(child);
+    group.remove(child);
   }
 }
 
@@ -103,7 +155,7 @@ function calculateScale(width, height) {
   return maxDim > 0 ? 8 / maxDim : 1;
 }
 
-function createMemberMesh(element, material, scale, offsets, wallThickness) {
+function createMemberMesh(element, material, scale, offsets, wallThickness, wallSide) {
   const { minX, minY, width, height } = offsets;
 
   const localX = element.x - minX;
@@ -112,19 +164,203 @@ function createMemberMesh(element, material, scale, offsets, wallThickness) {
   const centerY = (height / 2 - (localY + element.height / 2)) * scale;
 
   const depthSource = element.source?.[2];
-  const depth = (Number.isFinite(depthSource) ? depthSource : wallThickness) * scale;
+  const depthMm = Number.isFinite(depthSource) ? depthSource : wallThickness;
+  const depth = Math.max(depthMm * scale, scale * 6);
+  const centerZMm = computeMemberCenterZ(element, wallThickness, wallSide, depthMm);
 
   const geometry = new THREE.BoxGeometry(
     Math.max(element.width * scale, scale * 2),
     Math.max(element.height * scale, scale * 2),
-    Math.max(depth, scale * 6)
+    depth
   );
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(centerX, centerY, 0);
-  mesh.userData.kind = material === materials.stud ? "stud" : material === materials.blocking ? "blocking" : "plate";
+  mesh.position.set(centerX, centerY, centerZMm * scale);
+  const kind = material === materials.stud ? "stud" : material === materials.blocking ? "blocking" : "plate";
+  mesh.userData.kind = kind;
   mesh.userData.originalMaterial = material;
   mesh.userData.member = element;
+  mesh.userData.setHoverState = state => {
+    const targetMaterial = state ? highlightMaterials[kind] ?? material : material;
+    mesh.material = targetMaterial;
+  };
   return mesh;
+}
+
+function convertPointToWorld(point, offsets, scale) {
+  const localX = point.x - offsets.minX;
+  const localY = point.y - offsets.minY;
+  const worldX = (localX - offsets.width / 2) * scale;
+  const worldY = (offsets.height / 2 - localY) * scale;
+  return new THREE.Vector2(worldX, worldY);
+}
+
+function fallbackPanelPoints(panel) {
+  if (!Number.isFinite(panel.x) || !Number.isFinite(panel.y) || !Number.isFinite(panel.width) || !Number.isFinite(panel.height)) {
+    return [];
+  }
+  return [
+    { x: panel.x, y: panel.y + panel.height },
+    { x: panel.x, y: panel.y },
+    { x: panel.x + panel.width, y: panel.y },
+    { x: panel.x + panel.width, y: panel.y + panel.height }
+  ];
+}
+
+function dedupeSequentialPoints(points) {
+  const result = [];
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      continue;
+    }
+    const last = result[result.length - 1];
+    if (last && Math.abs(last.x - point.x) < 1e-6 && Math.abs(last.y - point.y) < 1e-6) {
+      continue;
+    }
+    result.push({ x: point.x, y: point.y });
+  }
+  if (result.length > 1) {
+    const first = result[0];
+    const last = result[result.length - 1];
+    if (Math.abs(first.x - last.x) < 1e-6 && Math.abs(first.y - last.y) < 1e-6) {
+      result.pop();
+    }
+  }
+  return result;
+}
+
+function computePanelZ(panel, wallThickness, wallSide = 1) {
+  const thickness = Number.isFinite(panel.thickness) ? panel.thickness : wallThickness;
+  const faceDir = wallSide >= 0 ? 1 : -1;
+  const halfWall = wallThickness / 2;
+  const flushOffset = faceDir * (halfWall - thickness / 2);
+  const epsilon = 0.6;
+  return flushOffset + faceDir * epsilon;
+}
+
+function computeMemberCenterZ(element, wallThickness, wallSide, depthMm) {
+  const offset = Number.isFinite(element.offset) ? element.offset : null;
+  const halfWall = wallThickness / 2;
+  const dir = wallSide >= 0 ? 1 : -1;
+  if (offset === null) {
+    return 0;
+  }
+  const clampedOffset = Math.max(0, Math.min(offset, wallThickness));
+  if (dir >= 0) {
+    const interiorFace = -halfWall;
+    return interiorFace + clampedOffset + depthMm / 2;
+  }
+  const interiorFace = halfWall;
+  return interiorFace - clampedOffset - depthMm / 2;
+}
+
+function createSheathingMesh(panel, scale, offsets, wallThickness, wallSide) {
+  const contourSource = panel.points && panel.points.length >= 3 ? panel.points : fallbackPanelPoints(panel);
+  const deduped = dedupeSequentialPoints(contourSource);
+  if (deduped.length < 3) {
+    return null;
+  }
+
+  const worldPoints = deduped.map(point => convertPointToWorld(point, offsets, scale));
+  const centroid = worldPoints.reduce((acc, pt) => acc.add(pt.clone()), new THREE.Vector2()).multiplyScalar(1 / worldPoints.length);
+
+  const shape = new THREE.Shape();
+  worldPoints.forEach((pt, index) => {
+    const relative = new THREE.Vector2(pt.x - centroid.x, pt.y - centroid.y);
+    if (index === 0) {
+      shape.moveTo(relative.x, relative.y);
+    } else {
+      shape.lineTo(relative.x, relative.y);
+    }
+  });
+
+  const thickness = Number.isFinite(panel.thickness) ? panel.thickness : wallThickness;
+  const depth = Math.max(thickness * scale, scale * 2);
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+  geometry.translate(0, 0, -depth / 2);
+
+  const mesh = new THREE.Mesh(geometry, materials.sheathing);
+  const centerZ = computePanelZ(panel, wallThickness, wallSide) * scale;
+  mesh.position.set(centroid.x, centroid.y, centerZ);
+  mesh.userData.kind = "sheathing";
+  mesh.userData.panel = panel;
+  mesh.userData.originalMaterial = materials.sheathing;
+  mesh.userData.setHoverState = state => {
+    mesh.material = state ? highlightMaterials.sheathing : materials.sheathing;
+  };
+  return mesh;
+}
+
+function computeNailRowZ(wallThickness, wallSide) {
+  const epsilon = 1.2;
+  const halfWall = wallThickness / 2;
+  const dir = wallSide >= 0 ? 1 : -1;
+  return dir * (halfWall + epsilon);
+}
+
+function createNailRowMesh(row, scale, offsets, wallThickness, wallSide) {
+  const start = convertPointToWorld(row.start, offsets, scale);
+  const end = convertPointToWorld(row.end, offsets, scale);
+  const length = start.distanceTo(end);
+  if (length < 1e-3) {
+    return null;
+  }
+
+  const rawSpacing = Number.isFinite(row.spacing) && row.spacing > 0 ? row.spacing : null;
+  const spacingWorld = rawSpacing ? rawSpacing * scale : null;
+  const minimumWorldSpacing = scale * 25;
+  const fallbackWorldSpacing = scale * 150;
+  const effectiveSpacing = spacingWorld && spacingWorld > minimumWorldSpacing ? spacingWorld : fallbackWorldSpacing;
+
+  let nailCount = Math.max(2, Math.floor(length / Math.max(effectiveSpacing, minimumWorldSpacing)) + 1);
+  const maxNails = 512;
+  nailCount = Math.min(maxNails, nailCount);
+
+  const direction = end.clone().sub(start);
+  const centerZ = computeNailRowZ(wallThickness, wallSide) * scale;
+
+  const diameterMm = Number.isFinite(row.gauge) && row.gauge > 0 ? row.gauge : 12;
+  const headSizeMm = Math.max(diameterMm * 1.4, 8);
+  const markerSizeWorld = headSizeMm * scale;
+  const instanced = new THREE.InstancedMesh(nailMarkerGeometry, materials.nailRow, nailCount);
+  instanced.frustumCulled = false;
+
+  const step = nailCount > 1 ? length / (nailCount - 1) : 0;
+  const directionUnit = direction.normalize();
+  tempVector2.set(start.x, start.y, centerZ);
+  tempVector3.set(end.x, end.y, centerZ);
+  if (wallSide >= 0) {
+    tempQuaternion.identity();
+  } else {
+    tempQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+  }
+  tempScale.set(markerSizeWorld, markerSizeWorld, markerSizeWorld);
+
+  for (let i = 0; i < nailCount; i += 1) {
+    if (nailCount === 1) {
+      tempVector.copy(tempVector2).lerp(tempVector3, 0.5);
+    } else if (i === nailCount - 1) {
+      tempVector.copy(tempVector3);
+    } else {
+      tempVector.set(directionUnit.x, directionUnit.y, 0).multiplyScalar(step * i);
+      tempVector.add(tempVector2);
+    }
+    tempMatrix.compose(tempVector, tempQuaternion, tempScale);
+    instanced.setMatrixAt(i, tempMatrix);
+  }
+  instanced.count = nailCount;
+  instanced.instanceMatrix.needsUpdate = true;
+
+  instanced.userData.kind = "nailRow";
+  instanced.userData.row = row;
+  instanced.userData.originalMaterial = materials.nailRow;
+  instanced.userData.length = length / scale;
+  instanced.userData.nails = nailCount;
+  instanced.userData.spacing = rawSpacing;
+  instanced.userData.setHoverState = state => {
+    instanced.material = state ? highlightMaterials.nailRow : materials.nailRow;
+  };
+
+  return instanced;
 }
 
 function adjustCamera(width, height) {
@@ -155,6 +391,7 @@ function updateModel(model) {
   const wallWidth = model.wall?.width ?? model.bounds.maxX - minX;
   const wallHeight = model.wall?.height ?? model.bounds.maxY - minY;
   const wallThickness = model.wall?.thickness ?? 90;
+  const wallSide = Number.isFinite(model.wall?.side) ? (model.wall.side >= 0 ? 1 : -1) : 1;
 
   const scale = calculateScale(wallWidth, wallHeight);
   cachedDimensions = {
@@ -164,20 +401,40 @@ function updateModel(model) {
     cameraDistance: cachedDimensions.cameraDistance
   };
 
-  clearFrameGroup();
+  clearHoverState();
+  clearGroup(groups.framing);
+  clearGroup(groups.sheathing);
+  clearGroup(groups.nailRows);
 
   const offsets = { minX, minY, width: wallWidth, height: wallHeight };
 
   for (const plate of model.plates) {
-    frameGroup.add(createMemberMesh(plate, materials.plate, scale, offsets, wallThickness));
+    const mesh = createMemberMesh(plate, materials.plate, scale, offsets, wallThickness, wallSide);
+    groups.framing.add(mesh);
   }
 
   for (const stud of model.studs) {
-    frameGroup.add(createMemberMesh(stud, materials.stud, scale, offsets, wallThickness));
+    const mesh = createMemberMesh(stud, materials.stud, scale, offsets, wallThickness, wallSide);
+    groups.framing.add(mesh);
   }
 
   for (const block of model.blocking) {
-    frameGroup.add(createMemberMesh(block, materials.blocking, scale, offsets, wallThickness));
+    const mesh = createMemberMesh(block, materials.blocking, scale, offsets, wallThickness, wallSide);
+    groups.framing.add(mesh);
+  }
+
+  for (const panel of model.sheathing ?? []) {
+    const mesh = createSheathingMesh(panel, scale, offsets, wallThickness, wallSide);
+    if (mesh) {
+      groups.sheathing.add(mesh);
+    }
+  }
+
+  for (const row of model.nailRows ?? []) {
+    const mesh = createNailRowMesh(row, scale, offsets, wallThickness, wallSide);
+    if (mesh) {
+      groups.nailRows.add(mesh);
+    }
   }
 
   adjustCamera(wallWidth * scale, wallHeight * scale);
@@ -185,6 +442,7 @@ function updateModel(model) {
 }
 
 const raycaster = new THREE.Raycaster();
+raycaster.params.Line = { threshold: 0.2 };
 const pointer = new THREE.Vector2();
 let hoveredMesh = null;
 let needsRender = true;
@@ -193,37 +451,113 @@ function requestRender() {
   needsRender = true;
 }
 
+function clearHoverState() {
+  if (hoveredMesh && hoveredMesh.userData?.setHoverState) {
+    hoveredMesh.userData.setHoverState(false);
+  }
+  hoveredMesh = null;
+  tooltip.classList.remove("show");
+  tooltip.textContent = "";
+  canvas.style.cursor = "";
+  requestRender();
+}
+
+function setHoveredObject(target) {
+  if (target === hoveredMesh) {
+    return;
+  }
+  if (hoveredMesh && hoveredMesh.userData?.setHoverState) {
+    hoveredMesh.userData.setHoverState(false);
+  }
+  hoveredMesh = target;
+  if (hoveredMesh && hoveredMesh.userData?.setHoverState) {
+    hoveredMesh.userData.setHoverState(true);
+    canvas.style.cursor = hoveredMesh.userData.kind ? "pointer" : "";
+  } else {
+    canvas.style.cursor = "";
+  }
+  requestRender();
+}
+
+function formatTooltipContent(object) {
+  if (!object?.userData) {
+    return null;
+  }
+  const { kind } = object.userData;
+  switch (kind) {
+    case "stud":
+    case "blocking":
+    case "plate": {
+      const member = object.userData.member;
+      if (!member) {
+        return null;
+      }
+      const kindLabel = capitalize(kind);
+      const depth = member.source?.[2];
+      return `${kindLabel} — ${formatNumber(member.width)} × ${formatNumber(member.height)} × ${formatNumber(depth)} mm @ (${formatNumber(
+        member.x
+      )}, ${formatNumber(member.y)})`;
+    }
+    case "sheathing": {
+      const panel = object.userData.panel;
+      if (!panel) {
+        return null;
+      }
+      const label = panel.material ? `Sheathing (${panel.material})` : "Sheathing";
+      const dims = `${formatNumber(panel.width)} × ${formatNumber(panel.height)} × ${formatNumber(panel.thickness)} mm`;
+      const originText = `@ (${formatNumber(panel.x)}, ${formatNumber(panel.y)})`;
+      const offsetText = Number.isFinite(panel.offset) ? `offset ${formatNumber(panel.offset)} mm` : null;
+      const rotationText = Number.isFinite(panel.rotation) ? `${formatNumber(panel.rotation)}°` : null;
+      const extras = [offsetText, rotationText].filter(Boolean).join(", ");
+      return extras ? `${label} — ${dims} ${originText} — ${extras}` : `${label} — ${dims} ${originText}`;
+    }
+    case "nailRow": {
+      const row = object.userData.row;
+      if (!row) {
+        return null;
+      }
+      const span = Math.hypot(row.end.x - row.start.x, row.end.y - row.start.y);
+      const nails = Number.isFinite(object.userData.nails) ? object.userData.nails : null;
+      const declaredSpacing = Number.isFinite(row.spacing) ? row.spacing : null;
+      const derivedSpacing = nails && nails > 1 ? span / (nails - 1) : null;
+      const spacingText = declaredSpacing ?? derivedSpacing;
+      const details = [`Nail row — span ${formatNumber(span)} mm`, `from (${formatNumber(row.start.x)}, ${formatNumber(row.start.y)})`];
+      if (nails) {
+        details.push(`${nails} nails`);
+      }
+      if (Number.isFinite(spacingText)) {
+        const spacingLabel = declaredSpacing ? "spacing" : "spacing≈";
+        details.push(`${spacingLabel} ${formatNumber(spacingText)} mm`);
+      }
+      if (Number.isFinite(row.gauge)) {
+        details.push(`gauge ${formatNumber(row.gauge)} mm`);
+      }
+      return details.join(" · ");
+    }
+    default:
+      return null;
+  }
+}
+
 function handlePointerMove(event) {
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
 
-  const intersects = raycaster.intersectObjects(frameGroup.children, false);
-  const hit = intersects[0]?.object ?? null;
+  const intersects = raycaster.intersectObjects(modelGroup.children, true);
+  const hit = intersects.find(intersection => intersection.object?.userData?.kind)?.object ?? null;
 
-  if (hit !== hoveredMesh) {
-    if (hoveredMesh) {
-      hoveredMesh.material = hoveredMesh.userData.originalMaterial;
-    }
-    hoveredMesh = hit;
-    if (hoveredMesh && hoveredMesh.userData.kind) {
-      const kind = hoveredMesh.userData.kind;
-      hoveredMesh.material = highlightMaterials[kind] ?? hoveredMesh.userData.originalMaterial;
-      canvas.style.cursor = "pointer";
-    } else {
-      canvas.style.cursor = "";
-    }
-    requestRender();
-  }
+  setHoveredObject(hit);
 
   if (hit && tooltip) {
-    const member = hit.userData.member;
-    const kindLabel = hit.userData.kind ? capitalize(hit.userData.kind) : "Member";
-
-    tooltip.textContent = `${kindLabel} — ${formatNumber(member.width)} × ${formatNumber(member.height)} × ${formatNumber(
-      member.source?.[2]
-    )} mm @ (${formatNumber(member.x)}, ${formatNumber(member.y)})`;
+    const tooltipText = formatTooltipContent(hit);
+    if (!tooltipText) {
+      tooltip.classList.remove("show");
+      tooltip.textContent = "";
+      return;
+    }
+    tooltip.textContent = tooltipText;
     tooltip.classList.add("show");
 
     const localX = event.clientX - rect.left;
@@ -249,18 +583,11 @@ function handlePointerMove(event) {
 }
 
 function handlePointerLeave() {
-  if (hoveredMesh) {
-    hoveredMesh.material = hoveredMesh.userData.originalMaterial;
-    hoveredMesh = null;
-    requestRender();
-  }
-  canvas.style.cursor = "";
-  tooltip.classList.remove("show");
-  tooltip.textContent = "";
+  clearHoverState();
 }
 
-function formatNumber(value) {
-  return Number.isFinite(value) ? value.toFixed(0) : "?";
+function formatNumber(value, digits = 0) {
+  return Number.isFinite(value) ? value.toFixed(digits) : "?";
 }
 
 function capitalize(value) {
@@ -291,12 +618,7 @@ canvas.addEventListener("contextmenu", event => {
 window.addEventListener("keydown", event => {
   if (event.key === "1") {
     controls.reset();
-    if (hoveredMesh) {
-      hoveredMesh.material = hoveredMesh.userData.originalMaterial;
-      hoveredMesh = null;
-    }
-    tooltip.classList.remove("show");
-    tooltip.textContent = "";
+    clearHoverState();
     requestRender();
   }
 });
