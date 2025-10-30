@@ -1,0 +1,347 @@
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { createMaterialLibrary } from "./materials.js";
+import {
+  calculateScale,
+  createMemberMesh,
+  createSheathingMesh,
+  createNailRowMesh,
+  createPafMeshes,
+  estimateSheathingTopZ
+} from "./geometry.js";
+import { formatTooltipContent } from "./tooltip.js";
+import { clearGroup } from "./utils.js";
+
+export class FrameViewer {
+  constructor({ canvas, tooltip } = {}) {
+    if (!canvas) {
+      throw new Error("FrameViewer requires a canvas element");
+    }
+
+    this.canvas = canvas;
+    this.tooltip = tooltip ?? null;
+
+    const { materials, highlightMaterials, nailMarkerGeometry } = createMaterialLibrary();
+    this.materials = materials;
+    this.highlightMaterials = highlightMaterials;
+    this.nailMarkerGeometry = nailMarkerGeometry;
+
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0xf1f4f9);
+
+    this.camera = new THREE.PerspectiveCamera(
+      36,
+      canvas.clientWidth / Math.max(canvas.clientHeight, 1),
+      0.1,
+      2000
+    );
+    this.camera.position.set(0, 0, 10);
+
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.12;
+    this.controls.enableRotate = true;
+    this.controls.enablePan = true;
+    this.controls.enableZoom = true;
+    this.controls.panSpeed = 0.9;
+    this.controls.rotateSpeed = 0.65;
+    this.controls.zoomSpeed = 1.0;
+    this.controls.screenSpacePanning = true;
+    this.controls.mouseButtons = {
+      LEFT: THREE.MOUSE.PAN,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.ROTATE
+    };
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x48505a, 0.85);
+    this.scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    dirLight.position.set(1.5, 2.5, 3.5);
+    this.scene.add(dirLight);
+
+    this.modelGroup = new THREE.Group();
+    this.scene.add(this.modelGroup);
+
+    this.groups = {
+      framing: new THREE.Group(),
+      sheathing: new THREE.Group(),
+      nailRows: new THREE.Group(),
+      pafRoutings: new THREE.Group()
+    };
+
+    this.modelGroup.add(
+      this.groups.framing,
+      this.groups.sheathing,
+      this.groups.nailRows,
+      this.groups.pafRoutings
+    );
+
+    this.raycaster = new THREE.Raycaster();
+    this.raycaster.params.Line = { threshold: 0.2 };
+    this.pointer = new THREE.Vector2();
+    this.hoveredObject = null;
+    this.needsRender = true;
+
+    this.cachedDimensions = {
+      width: 1,
+      height: 1,
+      scale: 1,
+      cameraDistance: 10
+    };
+
+    this.handlePointerMove = this.handlePointerMove.bind(this);
+    this.handlePointerLeave = this.handlePointerLeave.bind(this);
+    this.handleContextMenu = this.handleContextMenu.bind(this);
+    this.handleResize = this.handleResize.bind(this);
+    this.handleKeyDown = this.handleKeyDown.bind(this);
+    this.requestRender = this.requestRender.bind(this);
+    this.animate = this.animate.bind(this);
+
+    canvas.addEventListener("mousemove", this.handlePointerMove);
+    canvas.addEventListener("mouseleave", this.handlePointerLeave);
+    canvas.addEventListener("contextmenu", this.handleContextMenu);
+    window.addEventListener("resize", this.handleResize);
+    window.addEventListener("keydown", this.handleKeyDown);
+    this.controls.addEventListener("change", this.requestRender);
+
+    this.resizeRenderer();
+    this.animate();
+  }
+
+  updateModel(model) {
+    if (!model) {
+      return;
+    }
+
+    const minX = model.bounds.minX;
+    const minY = model.bounds.minY;
+    const wallWidth = model.wall?.width ?? model.bounds.maxX - minX;
+    const wallHeight = model.wall?.height ?? model.bounds.maxY - minY;
+    const wallThickness = model.wall?.thickness ?? 90;
+    const wallSide = Number.isFinite(model.wall?.side) ? (model.wall.side >= 0 ? 1 : -1) : 1;
+    const sheathingTopZMm = estimateSheathingTopZ(model.sheathing ?? [], wallThickness, wallSide);
+
+    const scale = calculateScale(wallWidth, wallHeight);
+    this.cachedDimensions = {
+      width: wallWidth,
+      height: wallHeight,
+      scale,
+      cameraDistance: this.cachedDimensions.cameraDistance
+    };
+
+    this.clearHoverState();
+    clearGroup(this.groups.framing);
+    clearGroup(this.groups.sheathing);
+    clearGroup(this.groups.nailRows);
+    clearGroup(this.groups.pafRoutings);
+
+    const offsets = { minX, minY, width: wallWidth, height: wallHeight };
+    const baseContext = {
+      materials: this.materials,
+      highlightMaterials: this.highlightMaterials,
+      nailMarkerGeometry: this.nailMarkerGeometry,
+      scale,
+      offsets,
+      wallThickness,
+      wallSide
+    };
+
+    for (const plate of model.plates ?? []) {
+      const mesh = createMemberMesh(plate, "plate", baseContext);
+      if (mesh) {
+        this.groups.framing.add(mesh);
+      }
+    }
+
+    for (const stud of model.studs ?? []) {
+      const mesh = createMemberMesh(stud, "stud", baseContext);
+      if (mesh) {
+        this.groups.framing.add(mesh);
+      }
+    }
+
+    for (const block of model.blocking ?? []) {
+      const mesh = createMemberMesh(block, "blocking", baseContext);
+      if (mesh) {
+        this.groups.framing.add(mesh);
+      }
+    }
+
+    for (const panel of model.sheathing ?? []) {
+      const mesh = createSheathingMesh(panel, baseContext);
+      if (mesh) {
+        this.groups.sheathing.add(mesh);
+      }
+    }
+
+    for (const row of model.nailRows ?? []) {
+      const mesh = createNailRowMesh(row, baseContext);
+      if (mesh) {
+        this.groups.nailRows.add(mesh);
+      }
+    }
+
+    for (const routing of model.pafRoutings ?? []) {
+      const meshes = createPafMeshes(routing, {
+        ...baseContext,
+        sheathingTopZMm
+      });
+      for (const mesh of meshes) {
+        this.groups.pafRoutings.add(mesh);
+      }
+    }
+
+    this.adjustCamera(wallWidth * scale, wallHeight * scale);
+    this.requestRender();
+  }
+
+  handlePointerMove(event) {
+    const rect = this.canvas.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+
+    const intersects = this.raycaster.intersectObjects(this.modelGroup.children, true);
+    const hit = intersects.find(intersection => intersection.object?.userData?.kind)?.object ?? null;
+
+    this.setHoveredObject(hit);
+
+    if (!this.tooltip) {
+      return;
+    }
+
+    if (hit) {
+      const tooltipText = formatTooltipContent(hit);
+      if (!tooltipText) {
+        this.tooltip.classList.remove("show");
+        this.tooltip.textContent = "";
+        return;
+      }
+      this.tooltip.textContent = tooltipText;
+      this.tooltip.classList.add("show");
+
+      const localX = event.clientX - rect.left;
+      const localY = event.clientY - rect.top;
+      const tooltipRect = this.tooltip.getBoundingClientRect();
+
+      let left = localX + 16;
+      let top = localY + 16;
+
+      if (left + tooltipRect.width > rect.width) {
+        left = rect.width - tooltipRect.width - 12;
+      }
+      if (top + tooltipRect.height > rect.height) {
+        top = rect.height - tooltipRect.height - 12;
+      }
+
+      this.tooltip.style.left = `${Math.max(12, left)}px`;
+      this.tooltip.style.top = `${Math.max(12, top)}px`;
+    } else {
+      this.tooltip.classList.remove("show");
+      this.tooltip.textContent = "";
+    }
+  }
+
+  handlePointerLeave() {
+    this.clearHoverState();
+  }
+
+  handleContextMenu(event) {
+    event.preventDefault();
+  }
+
+  handleResize() {
+    this.resizeRenderer();
+  }
+
+  handleKeyDown(event) {
+    if (event.key === "1") {
+      this.resetView();
+    }
+  }
+
+  resizeRenderer() {
+    const width = this.canvas.clientWidth;
+    const height = this.canvas.clientHeight;
+    if (width === 0 || height === 0) {
+      return;
+    }
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.requestRender();
+  }
+
+  adjustCamera(width, height) {
+    const diag = Math.sqrt(width * width + height * height);
+    const halfDiag = diag / 2 || 1;
+    const distance = halfDiag / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const safeDistance = distance * 1.4 + 2;
+    this.cachedDimensions.cameraDistance = safeDistance;
+
+    this.camera.position.set(0, 0, safeDistance);
+    this.camera.near = Math.max(safeDistance * 0.02, 0.1);
+    this.camera.far = Math.max(safeDistance * 6, 100);
+    this.camera.updateProjectionMatrix();
+
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
+    this.controls.saveState();
+    this.requestRender();
+  }
+
+  clearHoverState() {
+    if (this.hoveredObject && this.hoveredObject.userData?.setHoverState) {
+      this.hoveredObject.userData.setHoverState(false);
+    }
+    this.hoveredObject = null;
+    if (this.tooltip) {
+      this.tooltip.classList.remove("show");
+      this.tooltip.textContent = "";
+    }
+    this.canvas.style.cursor = "";
+    this.requestRender();
+  }
+
+  setHoveredObject(target) {
+    if (target === this.hoveredObject) {
+      return;
+    }
+    if (this.hoveredObject && this.hoveredObject.userData?.setHoverState) {
+      this.hoveredObject.userData.setHoverState(false);
+    }
+    this.hoveredObject = target;
+    if (this.hoveredObject && this.hoveredObject.userData?.setHoverState) {
+      this.hoveredObject.userData.setHoverState(true);
+      this.canvas.style.cursor = this.hoveredObject.userData.kind ? "pointer" : "";
+    } else {
+      this.canvas.style.cursor = "";
+    }
+    this.requestRender();
+  }
+
+  resetView() {
+    this.controls.reset();
+    this.clearHoverState();
+    this.requestRender();
+  }
+
+  requestRender() {
+    this.needsRender = true;
+  }
+
+  animate() {
+    this.animationFrame = requestAnimationFrame(this.animate);
+    const changed = this.controls.update();
+    if (this.needsRender || changed) {
+      this.renderer.render(this.scene, this.camera);
+      this.needsRender = false;
+    }
+  }
+}
