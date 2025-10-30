@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WUP Frame Visualizer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <canvas id="threeCanvas" aria-label="WebGL wall frame visualization"></canvas>
+    <div id="threeTooltip" class="tooltip" role="status" aria-live="polite"></div>
+    <div class="ui-overlay" role="region" aria-label="Controls and legend">
+      <div class="controls">
+        <label for="wupFile">Load WUP file:</label>
+        <input type="file" id="wupFile" accept=".wup">
+        <button id="loadExample" type="button">Load bundled example</button>
+        <span id="status" role="status"></span>
+      </div>
+      <div class="legend">
+        <h2>Legend</h2>
+        <ul>
+          <li><span class="swatch stud"></span> Studs (QS)</li>
+          <li><span class="swatch plate"></span> Plates (OG/UG)</li>
+          <li><span class="swatch blocking"></span> Blocking (LS)</li>
+        </ul>
+        <p class="legend-hint">Pan with left drag, orbit with right drag, scroll to zoom, press “1” to reset.</p>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="three-frame.js"></script>
+</body>
+</html>
