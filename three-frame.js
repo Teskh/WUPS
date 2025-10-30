@@ -55,10 +55,11 @@ scene.add(modelGroup);
 const groups = {
   framing: new THREE.Group(),
   sheathing: new THREE.Group(),
-  nailRows: new THREE.Group()
+  nailRows: new THREE.Group(),
+  pafRoutings: new THREE.Group()
 };
 
-modelGroup.add(groups.framing, groups.sheathing, groups.nailRows);
+modelGroup.add(groups.framing, groups.sheathing, groups.nailRows, groups.pafRoutings);
 
 const materials = {
   stud: new THREE.MeshStandardMaterial({ color: 0x3a7bd5, metalness: 0.04, roughness: 0.62 }),
@@ -72,7 +73,14 @@ const materials = {
     opacity: 0.9,
     side: THREE.DoubleSide
   }),
-  nailRow: new THREE.MeshStandardMaterial({ color: 0xd35400, metalness: 0.12, roughness: 0.45, side: THREE.DoubleSide })
+  nailRow: new THREE.MeshStandardMaterial({ color: 0xd35400, metalness: 0.12, roughness: 0.45, side: THREE.DoubleSide }),
+  pafRouting: new THREE.MeshStandardMaterial({
+    color: 0x8e44ad,
+    metalness: 0.16,
+    roughness: 0.48,
+    transparent: true,
+    opacity: 0.78
+  })
 };
 
 const highlightMaterials = {
@@ -80,7 +88,8 @@ const highlightMaterials = {
   blocking: materials.blocking.clone(),
   plate: materials.plate.clone(),
   sheathing: materials.sheathing.clone(),
-  nailRow: materials.nailRow.clone()
+  nailRow: materials.nailRow.clone(),
+  pafRouting: materials.pafRouting.clone()
 };
 
 Object.values(highlightMaterials).forEach(mat => {
@@ -363,6 +372,122 @@ function createNailRowMesh(row, scale, offsets, wallThickness, wallSide) {
   return instanced;
 }
 
+function determinePafFaceDirection(faceValue, wallSide) {
+  const baseDir = wallSide >= 0 ? 1 : -1;
+  if (!Number.isFinite(faceValue)) {
+    return baseDir;
+  }
+  const normalized = Math.round(faceValue);
+  if (normalized === 0) {
+    return baseDir;
+  }
+  if (normalized === 1) {
+    return -baseDir;
+  }
+  if (normalized < 0) {
+    return -baseDir;
+  }
+  return baseDir;
+}
+
+function createPafSegmentMesh(segment, routing, scale, offsets, wallThickness, wallSide, sheathingTopZMm) {
+  const basePoint = segment?.position ?? segment?.start;
+  if (!basePoint) {
+    return null;
+  }
+
+  const faceDir = determinePafFaceDirection(routing.face, wallSide);
+  const radiusMm = (() => {
+    if (Number.isFinite(segment?.radius)) {
+      return Math.max(segment.radius, 0.5);
+    }
+    if (Number.isFinite(segment?.toolDiameter)) {
+      return Math.max(segment.toolDiameter / 2, 0.5);
+    }
+    return 20;
+  })();
+  const depthMm = (() => {
+    if (Number.isFinite(segment?.depth)) {
+      return Math.max(segment.depth, 0.5);
+    }
+    if (Number.isFinite(segment?.depthRaw)) {
+      return Math.max(Math.abs(segment.depthRaw), 0.5);
+    }
+    return Math.min(12, wallThickness);
+  })();
+
+  const surfaceZMm = Number.isFinite(sheathingTopZMm)
+    ? sheathingTopZMm
+    : faceDir * (wallThickness / 2);
+  const tinyLift = 0.05;
+  const topZMm = surfaceZMm + faceDir * tinyLift;
+  const centerZMm = topZMm - faceDir * depthMm / 2;
+
+  const worldPoint = convertPointToWorld(basePoint, offsets, scale);
+  const radiusWorld = Math.max(radiusMm * scale, scale * 2);
+  const depthWorld = Math.max(depthMm * scale, scale * 2);
+
+  const geometry = new THREE.CylinderGeometry(radiusWorld, radiusWorld, depthWorld, 32);
+  geometry.rotateX(Math.PI / 2);
+  const mesh = new THREE.Mesh(geometry, materials.pafRouting);
+  mesh.position.set(worldPoint.x, worldPoint.y, centerZMm * scale);
+
+  mesh.userData.kind = "paf";
+  mesh.userData.routing = routing;
+  mesh.userData.segment = segment;
+  mesh.userData.originalMaterial = materials.pafRouting;
+  mesh.userData.setHoverState = state => {
+    mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+  };
+  return mesh;
+}
+
+function createPafMeshes(routing, scale, offsets, wallThickness, wallSide, sheathingTopZMm) {
+  if (!routing?.segments) {
+    return [];
+  }
+  const meshes = [];
+  for (const segment of routing.segments) {
+    const mesh = createPafSegmentMesh(segment, routing, scale, offsets, wallThickness, wallSide, sheathingTopZMm);
+    if (mesh) {
+      meshes.push(mesh);
+    }
+  }
+  return meshes;
+}
+
+function estimateSheathingTopZ(panels, wallThickness, wallSide) {
+  const faceDir = wallSide >= 0 ? 1 : -1;
+  if (!Array.isArray(panels) || panels.length === 0) {
+    const epsilon = 0.6;
+    return faceDir * (wallThickness / 2 + epsilon);
+  }
+  let extremum = null;
+  for (const panel of panels) {
+    const thickness = Number.isFinite(panel?.thickness) ? panel.thickness : wallThickness;
+    const centerZ = computePanelZ(panel, wallThickness, wallSide);
+    if (!Number.isFinite(centerZ)) {
+      continue;
+    }
+    const top = centerZ + faceDir * (thickness / 2);
+    if (!Number.isFinite(top)) {
+      continue;
+    }
+    if (extremum === null) {
+      extremum = top;
+    } else if (faceDir >= 0) {
+      extremum = Math.max(extremum, top);
+    } else {
+      extremum = Math.min(extremum, top);
+    }
+  }
+  if (extremum === null) {
+    const epsilon = 0.6;
+    return faceDir * (wallThickness / 2 + epsilon);
+  }
+  return extremum;
+}
+
 function adjustCamera(width, height) {
   const diag = Math.sqrt(width * width + height * height);
   const halfDiag = diag / 2 || 1;
@@ -392,6 +517,7 @@ function updateModel(model) {
   const wallHeight = model.wall?.height ?? model.bounds.maxY - minY;
   const wallThickness = model.wall?.thickness ?? 90;
   const wallSide = Number.isFinite(model.wall?.side) ? (model.wall.side >= 0 ? 1 : -1) : 1;
+  const sheathingTopZMm = estimateSheathingTopZ(model.sheathing ?? [], wallThickness, wallSide);
 
   const scale = calculateScale(wallWidth, wallHeight);
   cachedDimensions = {
@@ -405,6 +531,7 @@ function updateModel(model) {
   clearGroup(groups.framing);
   clearGroup(groups.sheathing);
   clearGroup(groups.nailRows);
+  clearGroup(groups.pafRoutings);
 
   const offsets = { minX, minY, width: wallWidth, height: wallHeight };
 
@@ -434,6 +561,13 @@ function updateModel(model) {
     const mesh = createNailRowMesh(row, scale, offsets, wallThickness, wallSide);
     if (mesh) {
       groups.nailRows.add(mesh);
+    }
+  }
+
+  for (const routing of model.pafRoutings ?? []) {
+    const meshes = createPafMeshes(routing, scale, offsets, wallThickness, wallSide, sheathingTopZMm);
+    for (const mesh of meshes) {
+      groups.pafRoutings.add(mesh);
     }
   }
 
@@ -533,6 +667,51 @@ function formatTooltipContent(object) {
         details.push(`gauge ${formatNumber(row.gauge)} mm`);
       }
       return details.join(" · ");
+    }
+    case "paf": {
+      const routing = object.userData.routing;
+      const segment = object.userData.segment;
+      const basePoint = segment?.position ?? segment?.start;
+      if (!routing || !segment || !basePoint) {
+        return null;
+      }
+      const toolParts = [];
+      if (Number.isFinite(routing.tool)) {
+        toolParts.push(`tool ${routing.tool}`);
+      }
+      if (Number.isFinite(routing.face)) {
+        toolParts.push(`face ${routing.face}`);
+      }
+      if (Number.isFinite(routing.passes)) {
+        toolParts.push(`${routing.passes} pass${routing.passes === 1 ? "" : "es"}`);
+      }
+      const radiusMm = Number.isFinite(segment.radius)
+        ? segment.radius
+        : Number.isFinite(segment.toolDiameter)
+          ? segment.toolDiameter / 2
+          : null;
+      const diameterMm = Number.isFinite(radiusMm) ? radiusMm * 2 : Number.isFinite(segment.toolDiameter) ? segment.toolDiameter : null;
+      const depthMm = Number.isFinite(segment.depth)
+        ? segment.depth
+        : Number.isFinite(segment.depthRaw)
+          ? Math.abs(segment.depthRaw)
+          : null;
+      const detailParts = [
+        `@ (${formatNumber(basePoint.x)}, ${formatNumber(basePoint.y)})`
+      ];
+      if (Number.isFinite(radiusMm)) {
+        detailParts.push(`radius ${formatNumber(radiusMm)} mm`);
+      } else if (Number.isFinite(diameterMm)) {
+        detailParts.push(`Ø${formatNumber(diameterMm)} mm`);
+      }
+      if (Number.isFinite(depthMm)) {
+        detailParts.push(`depth ${formatNumber(depthMm)} mm`);
+      }
+      if (Number.isFinite(segment.orientation)) {
+        detailParts.push(`orientation ${formatNumber(segment.orientation)}°`);
+      }
+      const metaText = toolParts.length ? ` (${toolParts.join(", ")})` : "";
+      return `PAF routing${metaText} — ${detailParts.join(" · ")}`;
     }
     default:
       return null;

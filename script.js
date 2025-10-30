@@ -58,10 +58,11 @@ function handleWupText(text, label) {
     const plateCount = model.plates.length;
     const sheathingCount = model.sheathing.length;
     const nailRowCount = model.nailRows.length;
+    const pafCount = model.pafRoutings?.length ?? 0;
     const wallWidth = model.wall?.width ? model.wall.width.toFixed(0) : "?";
     const wallHeight = model.wall?.height ? model.wall.height.toFixed(0) : "?";
     reportInfo(
-      `Loaded ${label} — studs: ${studCount}, blocking: ${blockingCount}, plates: ${plateCount}, sheathing: ${sheathingCount}, nail rows: ${nailRowCount}, wall: ${wallWidth}×${wallHeight} mm`
+      `Loaded ${label} — studs: ${studCount}, blocking: ${blockingCount}, plates: ${plateCount}, sheathing: ${sheathingCount}, nail rows: ${nailRowCount}, PAF routings: ${pafCount}, wall: ${wallWidth}×${wallHeight} mm`
     );
   } catch (err) {
     reportError(`Failed to parse ${label}: ${err.message}`);

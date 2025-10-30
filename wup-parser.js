@@ -18,6 +18,7 @@ export function parseWup(wupText) {
     blocking: [],
     sheathing: [],
     nailRows: [],
+    pafRoutings: [],
     bounds: { ...DEFAULT_BOUNDS },
     unhandled: []
   };
@@ -29,6 +30,20 @@ export function parseWup(wupText) {
 
   let currentModule = null;
   let currentPanel = null;
+  let currentRouting = null;
+
+  function finalizeRouting() {
+    if (currentRouting && currentRouting.segments.length > 0) {
+      model.pafRoutings.push(currentRouting);
+    } else if (currentRouting) {
+      model.unhandled.push({
+        command: "PAF",
+        numbers: currentRouting.source ?? [],
+        body: currentRouting.body ?? ""
+      });
+    }
+    currentRouting = null;
+  }
 
   for (const statement of statements) {
     const { command, body } = splitCommand(statement);
@@ -101,6 +116,46 @@ export function parseWup(wupText) {
         }
         break;
       }
+      case "PAF": {
+        finalizeRouting();
+        currentRouting = {
+          tool: numbers[0] ?? null,
+          face: numbers[1] ?? null,
+          passes: numbers[2] ?? null,
+          segments: [],
+          source: numbers,
+          body
+        };
+        break;
+      }
+      case "MP": {
+        if (!currentRouting) {
+          model.unhandled.push({ command, numbers, body });
+          break;
+        }
+        if (numbers.length >= 3) {
+          const position = { x: numbers[0], y: numbers[1] };
+          const radiusValue = numbers[2] ?? null;
+          const depthRaw = numbers[3] ?? null;
+          const segment = {
+            position,
+            radius: Number.isFinite(radiusValue) ? Math.abs(radiusValue) : null,
+            depth: Number.isFinite(depthRaw) ? Math.abs(depthRaw) : null,
+            depthRaw: Number.isFinite(depthRaw) ? depthRaw : null,
+            orientation: numbers[4] ?? null,
+            feed: numbers[5] ?? null,
+            extras: numbers.slice(6),
+            source: numbers
+          };
+          currentRouting.segments.push(segment);
+          const radius = Number.isFinite(segment.radius) ? segment.radius : 0;
+          extendBoundsPoint(model.bounds, position.x - radius, position.y - radius);
+          extendBoundsPoint(model.bounds, position.x + radius, position.y + radius);
+        } else {
+          model.unhandled.push({ command, numbers, body });
+        }
+        break;
+      }
       case "PLI1": {
         if (numbers.length >= 6) {
           const materialToken = extractFirstStringToken(body);
@@ -158,6 +213,8 @@ export function parseWup(wupText) {
       }
     }
   }
+
+  finalizeRouting();
 
   if (!Number.isFinite(model.bounds.minX)) {
     throw new Error("No frame members detected in the WUP file");
