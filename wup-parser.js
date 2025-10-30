@@ -31,8 +31,52 @@ export function parseWup(wupText) {
   let currentModule = null;
   let currentPanel = null;
   let currentRouting = null;
+  let currentPolygon = null;
+
+  function finalizePolygonSegment() {
+    if (!currentPolygon) {
+      return;
+    }
+
+    const deduped = dedupePolygonPoints(currentPolygon.points);
+    if (!currentRouting || deduped.length < 2) {
+      currentPolygon = null;
+      return;
+    }
+
+    const closed = isClosedLoop(deduped);
+    const normalizedPoints = (closed ? deduped.slice(0, -1) : deduped).map(point => ({ ...point }));
+    if (closed && normalizedPoints.length >= 3) {
+      const segment = {
+        kind: "polygon",
+        points: normalizedPoints,
+        depth: averageOrNull(currentPolygon.depthSamples, Math.abs),
+        depthRaw: averageOrNull(currentPolygon.depthRawSamples),
+        offset: averageOrNull(currentPolygon.offsetSamples),
+        orientation: averageOrNull(currentPolygon.orientationSamples),
+        z: averageOrNull(currentPolygon.zSamples),
+        source: currentPolygon.source.map(numbers => [...numbers])
+      };
+      currentRouting.segments.push(segment);
+    } else if (normalizedPoints.length >= 2) {
+      const segment = {
+        kind: "polyline",
+        points: normalizedPoints,
+        depth: averageOrNull(currentPolygon.depthSamples, Math.abs),
+        depthRaw: averageOrNull(currentPolygon.depthRawSamples),
+        offset: averageOrNull(currentPolygon.offsetSamples),
+        orientation: averageOrNull(currentPolygon.orientationSamples),
+        z: averageOrNull(currentPolygon.zSamples),
+        source: currentPolygon.source.map(numbers => [...numbers])
+      };
+      currentRouting.segments.push(segment);
+    }
+
+    currentPolygon = null;
+  }
 
   function finalizeRouting() {
+    finalizePolygonSegment();
     if (currentRouting && currentRouting.segments.length > 0) {
       model.pafRoutings.push(currentRouting);
     } else if (currentRouting) {
@@ -129,6 +173,7 @@ export function parseWup(wupText) {
         break;
       }
       case "MP": {
+        finalizePolygonSegment();
         if (!currentRouting) {
           model.unhandled.push({ command, numbers, body });
           break;
@@ -188,6 +233,55 @@ export function parseWup(wupText) {
           };
           currentPanel.points.push(point);
           extendBoundsPoint(model.bounds, point.x, point.y);
+        } else if (currentRouting && numbers.length >= 2) {
+          const x = numbers[0];
+          const y = numbers[1];
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            model.unhandled.push({ command, numbers, body });
+            break;
+          }
+
+          if (!currentPolygon) {
+            currentPolygon = {
+              points: [],
+              depthSamples: [],
+              depthRawSamples: [],
+              offsetSamples: [],
+              orientationSamples: [],
+              zSamples: [],
+              source: []
+            };
+          }
+
+          const point = {
+            x,
+            y,
+            z: Number.isFinite(numbers[2]) ? numbers[2] : null,
+            offset: Number.isFinite(numbers[3]) ? numbers[3] : null,
+            orientation: Number.isFinite(numbers[4]) ? numbers[4] : null,
+            depthRaw: Number.isFinite(numbers[5]) ? numbers[5] : null,
+            extras: numbers.slice(6),
+            source: [...numbers]
+          };
+
+          currentPolygon.points.push(point);
+          currentPolygon.source.push([...numbers]);
+
+          if (Number.isFinite(point.depthRaw)) {
+            currentPolygon.depthSamples.push(Math.abs(point.depthRaw));
+            currentPolygon.depthRawSamples.push(point.depthRaw);
+          }
+          if (Number.isFinite(point.offset)) {
+            currentPolygon.offsetSamples.push(point.offset);
+          }
+          if (Number.isFinite(point.orientation)) {
+            currentPolygon.orientationSamples.push(point.orientation);
+          }
+          if (Number.isFinite(point.z)) {
+            currentPolygon.zSamples.push(point.z);
+          }
+
+          extendBoundsPoint(model.bounds, point.x, point.y);
         } else {
           model.unhandled.push({ command, numbers, body });
         }
@@ -205,14 +299,15 @@ export function parseWup(wupText) {
           model.nailRows.push(row);
           extendBoundsPoint(model.bounds, row.start.x, row.start.y);
           extendBoundsPoint(model.bounds, row.end.x, row.end.y);
-        }
-        break;
       }
-      default: {
-        model.unhandled.push({ command, numbers, body });
-      }
+      break;
+    }
+    default: {
+      finalizePolygonSegment();
+      model.unhandled.push({ command, numbers, body });
     }
   }
+}
 
   finalizeRouting();
 
@@ -330,6 +425,42 @@ function extendBoundsPoint(bounds, x, y) {
   bounds.minY = Math.min(bounds.minY, y);
   bounds.maxX = Math.max(bounds.maxX, x);
   bounds.maxY = Math.max(bounds.maxY, y);
+}
+
+function dedupePolygonPoints(points) {
+  const result = [];
+  for (const point of points ?? []) {
+    if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) {
+      continue;
+    }
+    const last = result[result.length - 1];
+    if (last && isApproximatelyEqual(last.x, point.x) && isApproximatelyEqual(last.y, point.y)) {
+      continue;
+    }
+    result.push(point);
+  }
+  return result;
+}
+
+function isClosedLoop(points) {
+  if (!points || points.length < 2) {
+    return false;
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  return isApproximatelyEqual(first.x, last.x) && isApproximatelyEqual(first.y, last.y);
+}
+
+function isApproximatelyEqual(a, b) {
+  return Math.abs(a - b) < 1e-6;
+}
+
+function averageOrNull(values, mapFn = v => v) {
+  if (!values || values.length === 0) {
+    return null;
+  }
+  const sum = values.reduce((acc, value) => acc + mapFn(value), 0);
+  return sum / values.length;
 }
 
 if (typeof window !== "undefined") {

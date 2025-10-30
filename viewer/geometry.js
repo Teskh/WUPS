@@ -316,8 +316,25 @@ function determinePafFaceDirection(faceValue, wallSide) {
   return baseDir;
 }
 
+function resolvePafSegmentDepthMm(segment, wallThickness) {
+  if (Number.isFinite(segment?.depth) && segment.depth > 0) {
+    return Math.max(segment.depth, 0.5);
+  }
+  if (Number.isFinite(segment?.depthRaw)) {
+    return Math.max(Math.abs(segment.depthRaw), 0.5);
+  }
+  return Math.min(12, wallThickness);
+}
+
 function createPafSegmentMesh(segment, routing, context) {
   const { materials, highlightMaterials, scale, offsets, wallThickness, wallSide, sheathingTopZMm } = context;
+  if (segment?.kind === "polygon") {
+    return createPafPolygonMesh(segment, routing, context);
+  }
+  if (segment?.kind === "polyline") {
+    return null;
+  }
+
   const basePoint = segment?.position ?? segment?.start;
   if (!basePoint) {
     return null;
@@ -333,15 +350,7 @@ function createPafSegmentMesh(segment, routing, context) {
     }
     return 20;
   })();
-  const depthMm = (() => {
-    if (Number.isFinite(segment?.depth)) {
-      return Math.max(segment.depth, 0.5);
-    }
-    if (Number.isFinite(segment?.depthRaw)) {
-      return Math.max(Math.abs(segment.depthRaw), 0.5);
-    }
-    return Math.min(12, wallThickness);
-  })();
+  const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
 
   const surfaceZMm = Number.isFinite(sheathingTopZMm)
     ? sheathingTopZMm
@@ -366,5 +375,69 @@ function createPafSegmentMesh(segment, routing, context) {
   mesh.userData.setHoverState = state => {
     mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
   };
+  return mesh;
+}
+
+function createPafPolygonMesh(segment, routing, context) {
+  const {
+    materials,
+    highlightMaterials,
+    scale,
+    offsets,
+    wallThickness,
+    wallSide,
+    sheathingTopZMm
+  } = context;
+  const points = Array.isArray(segment?.points) ? segment.points : null;
+  if (!points || points.length < 3) {
+    return null;
+  }
+
+  const deduped = dedupeSequentialPoints(points);
+  if (deduped.length < 3) {
+    return null;
+  }
+
+  const worldPoints = deduped.map(point => convertPointToWorld(point, offsets, scale));
+  const centroid = worldPoints
+    .reduce((acc, pt) => acc.add(pt.clone()), new THREE.Vector2())
+    .multiplyScalar(1 / worldPoints.length);
+
+  const shape = new THREE.Shape();
+  worldPoints.forEach((pt, index) => {
+    const relativeX = pt.x - centroid.x;
+    const relativeY = pt.y - centroid.y;
+    if (index === 0) {
+      shape.moveTo(relativeX, relativeY);
+    } else {
+      shape.lineTo(relativeX, relativeY);
+    }
+  });
+  shape.closePath();
+
+  const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
+  const depthWorld = Math.max(depthMm * scale, scale * 2);
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: depthWorld, bevelEnabled: false });
+  geometry.translate(0, 0, -depthWorld / 2);
+
+  const faceDir = determinePafFaceDirection(routing.face, wallSide);
+  const surfaceZMm = Number.isFinite(sheathingTopZMm)
+    ? sheathingTopZMm
+    : faceDir * (wallThickness / 2);
+  const tinyLift = 0.05;
+  const topZMm = surfaceZMm + faceDir * tinyLift;
+  const centerZMm = topZMm - faceDir * (depthMm / 2);
+
+  const mesh = new THREE.Mesh(geometry, materials.pafRouting);
+  mesh.position.set(centroid.x, centroid.y, centerZMm * scale);
+
+  mesh.userData.kind = "paf";
+  mesh.userData.routing = routing;
+  mesh.userData.segment = segment;
+  mesh.userData.originalMaterial = materials.pafRouting;
+  mesh.userData.setHoverState = state => {
+    mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+  };
+
   return mesh;
 }
