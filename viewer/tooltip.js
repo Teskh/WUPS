@@ -6,6 +6,101 @@ function capitalize(value) {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
+function computePolygonCentroid(points) {
+  if (!Array.isArray(points)) {
+    return null;
+  }
+  const valid = points.filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
+  if (valid.length === 0) {
+    return null;
+  }
+  if (valid.length < 3) {
+    const sum = valid.reduce(
+      (acc, point) => {
+        acc.x += point.x;
+        acc.y += point.y;
+        return acc;
+      },
+      { x: 0, y: 0 }
+    );
+    return {
+      x: sum.x / valid.length,
+      y: sum.y / valid.length
+    };
+  }
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < valid.length; i += 1) {
+    const current = valid[i];
+    const next = valid[(i + 1) % valid.length];
+    const cross = current.x * next.y - next.x * current.y;
+    area += cross;
+    cx += (current.x + next.x) * cross;
+    cy += (current.y + next.y) * cross;
+  }
+  if (Math.abs(area) < 1e-6) {
+    const sum = valid.reduce(
+      (acc, point) => {
+        acc.x += point.x;
+        acc.y += point.y;
+        return acc;
+      },
+      { x: 0, y: 0 }
+    );
+    return {
+      x: sum.x / valid.length,
+      y: sum.y / valid.length
+    };
+  }
+  const factor = 1 / (3 * area);
+  return {
+    x: cx * factor,
+    y: cy * factor
+  };
+}
+
+function computeFootprintSize(points) {
+  if (!Array.isArray(points)) {
+    return null;
+  }
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let count = 0;
+  for (const point of points) {
+    if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) {
+      continue;
+    }
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+    count += 1;
+  }
+  if (count === 0) {
+    return null;
+  }
+  return {
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
+
+function resolvePafBasePoint(segment) {
+  if (segment?.position && Number.isFinite(segment.position.x) && Number.isFinite(segment.position.y)) {
+    return segment.position;
+  }
+  if (segment?.start && Number.isFinite(segment.start.x) && Number.isFinite(segment.start.y)) {
+    return segment.start;
+  }
+  if (Array.isArray(segment?.points)) {
+    return computePolygonCentroid(segment.points);
+  }
+  return null;
+}
+
 export function formatTooltipContent(object) {
   if (!object?.userData) {
     return null;
@@ -64,7 +159,7 @@ export function formatTooltipContent(object) {
     case "paf": {
       const routing = object.userData.routing;
       const segment = object.userData.segment;
-      const basePoint = segment?.position ?? segment?.start;
+      const basePoint = resolvePafBasePoint(segment);
       if (!routing || !segment || !basePoint) {
         return null;
       }
@@ -90,6 +185,12 @@ export function formatTooltipContent(object) {
           ? Math.abs(segment.depthRaw)
           : null;
       const detailParts = [`@ (${formatNumber(basePoint.x)}, ${formatNumber(basePoint.y)})`];
+      if (segment.kind === "polygon" && Array.isArray(segment.points) && segment.points.length >= 3) {
+        const footprint = computeFootprintSize(segment.points);
+        if (footprint && Number.isFinite(footprint.width) && Number.isFinite(footprint.height)) {
+          detailParts.push(`footprint ${formatNumber(footprint.width)} × ${formatNumber(footprint.height)} mm`);
+        }
+      }
       if (Number.isFinite(radiusMm)) {
         detailParts.push(`radius ${formatNumber(radiusMm)} mm`);
       } else if (Number.isFinite(diameterMm)) {
