@@ -43,6 +43,13 @@ export function createMaterialLibrary() {
       roughness: 0.45,
       side: THREE.DoubleSide
     }),
+    boyOperation: new THREE.MeshStandardMaterial({
+      color: 0x2ecc71,
+      metalness: 0.1,
+      roughness: 0.5,
+      transparent: true,
+      opacity: 0.85
+    }),
     pafRouting: new THREE.MeshStandardMaterial({
       color: 0x8e44ad,
       metalness: 0.16,
@@ -58,6 +65,7 @@ export function createMaterialLibrary() {
     plate: materials.plate.clone(),
     sheathing: materials.sheathing.clone(),
     nailRow: materials.nailRow.clone(),
+    boyOperation: materials.boyOperation.clone(),
     pafRouting: materials.pafRouting.clone()
   };
 

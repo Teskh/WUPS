@@ -205,6 +205,62 @@ export function formatTooltipContent(object) {
       const metaText = toolParts.length ? ` (${toolParts.join(", ")})` : "";
       return `PAF routing${metaText} — ${detailParts.join(" · ")}`;
     }
+    case "boy": {
+      const operation = object.userData.operation;
+      if (!operation) {
+        return null;
+      }
+      const depthInfo = object.userData.depthInfo ?? null;
+      const diameter = Number.isFinite(operation.diameter) ? operation.diameter : null;
+      const depthMagnitude = Number.isFinite(depthInfo?.depth)
+        ? depthInfo.depth
+        : Number.isFinite(operation.depth)
+          ? Math.abs(operation.depth)
+          : null;
+      const directionLabel =
+        depthInfo?.directionLabel ??
+        (Number.isFinite(operation.depth)
+          ? operation.depth >= 0
+            ? "+Y"
+            : "-Y"
+          : null);
+      const entryY = Number.isFinite(depthInfo?.entryY) ? depthInfo.entryY : null;
+      const plate = object.userData.plate ?? null;
+      const plateLabel = (() => {
+        if (!plate) {
+          return null;
+        }
+        const plateTop = Number.isFinite(plate.y) && Number.isFinite(plate.height) ? plate.y + plate.height : null;
+        if (!Number.isFinite(plateTop) || !Number.isFinite(plate.y)) {
+          return null;
+        }
+        if (directionLabel === "-Y") {
+          return "top plate";
+        }
+        if (directionLabel === "+Y") {
+          return "bottom plate";
+        }
+        return null;
+      })();
+
+      const details = [`@ (${formatNumber(operation.x)}, ${formatNumber(operation.z)})`];
+      if (Number.isFinite(diameter)) {
+        details.push(`Ø${formatNumber(diameter)} mm`);
+      }
+      if (Number.isFinite(depthMagnitude)) {
+        details.push(`depth ${formatNumber(depthMagnitude)} mm`);
+      }
+      if (directionLabel) {
+        details.push(`direction ${directionLabel}`);
+      }
+      if (Number.isFinite(entryY)) {
+        details.push(`entry y ${formatNumber(entryY)} mm`);
+      }
+      if (plateLabel) {
+        details.push(plateLabel);
+      }
+      return `BOY drilling — ${details.join(" · ")}`;
+    }
     default:
       return null;
   }

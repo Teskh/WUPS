@@ -230,12 +230,14 @@ Elements of the file header must be located at the beginning of each file. The k
 | ELB | name | | Element name for unique identification of the wall type |
 | ELN | name | X | Element name |
 | ZNR | number | X | Drawing number |
-| SERIES | number | X | Production sequence |
+| REIHE | number | X | Production sequence |
 | ELA | view | | Element view {INNEN}. Value range: INNEN, AUSSEN, INTERIOR, EXTERIOR, INTERNAL, EXTERNAL |
 | ELM | lx, by, hz [,n [,X offset[,Y offset]]] | | Element dimensions of a prefabricated house element.<br>lx: Maximum value of the x ordinate (:float)<br>by: Maximum value of the y ordinate (:float)<br>hz: Maximum value of the z ordinate (:float)<br>n: Quantity {1} (:unsigned int)<br>X offset: Offset dimension in x direction {0} (:float)<br>Y offset: Offset dimension in y direction {0} (:float) |
 | WNP | value | X | Workpiece zero point. Sole permissible value: BOTTOM LEFT. WNP should no longer be used. |
 | CAD | value | X | Specification of the CAD program (free text) |
 | CADRELEASE | value | X | Specification of the CAD version (free text) |
+
+**Note:** Keyword spellings in this table mirror the tokens used inside `.wup` files (e.g. `REIHE`, `MODUL`). Any English wording in the surrounding prose is descriptive only.
 
 ### 3.2 Components
 
@@ -295,8 +297,8 @@ Defines prefabricated components, and their processing steps, that are combined 
 
 | Command | Parameter | Description |
 |---------|-----------|-------------|
-| MODULE | lx, by, hz, x, y, name[,z] | Assembly, followed by components and their processing steps<br>lx: Length (:float)<br>by: Width (:float)<br>hz: Height (:float)<br>x, y: Position (:float)<br>name: Designation (:string)<br>z: Position {0} (:uint) |
-| ENDMODULE | | End of assembly definition |
+| MODUL | lx, by, hz, x, y, name[,z] | Assembly, followed by components and their processing steps<br>lx: Length (:float)<br>by: Width (:float)<br>hz: Height (:float)<br>x, y: Position (:float)<br>name: Designation (:string)<br>z: Position {0} (:uint) |
+| ENDMODUL | | End of assembly definition |
 
 Components and processing steps within a module refer to an element coordinate system that starts in the origin of the module.
 
@@ -306,8 +308,12 @@ The spatial processing plane defines a new coordinate system.
 
 | Command | Parameter | Description |
 |---------|-----------|-------------|
-| RBE2 | e, x, y, z, α, γ, δ | Spatial processing plane for beams<br>e: Reference plane. value range:<br>  - Component processing steps: 1...6<br>  - Panel processing steps: 2<br>x,y,z: Position<br>α: Rotation angle in relation to the X axis<br>γ: Tilt angle in relation to the y' axis<br>δ: Rotation angle in relation to the x'' axis |
+| RBE2 | e, x, y, z, α, γ, δ | Spatial processing plane for beams<br>e: Reference plane. value range:<br>  - Component processing steps: 1...6<br>  - Panel processing steps: 2<br>x,y,z: Position<br>α: Rotation angle around the Z axis<br>γ: Tilt angle around the transformed X' axis<br>δ: Rotation angle around the transformed Z'' axis |
 | ENDRBE2 | | End of spatial processing plane |
+
+#### 3.3.1 Legacy spatial processing plane (RBE)
+
+Projects exported with interface versions 3.0–3.3 can still include `RBE ...` / `ENDRBE;` blocks. They define a spatial plane for beam processing with the reduced parameter list `RBE e, x, y, z, α`. The parameters match the definitions used by `RBE2`, but legacy files only support the primary rotation `α`; tilting (`γ`) and secondary rotation (`δ`) are not available and any nested planes are ignored. New exports should prefer `RBE2`, yet a parser must continue to recognise `RBE` so older jobs can be re-run without modification.
 
 Data types: Floating point number. Exceptions "e": Natural numbers.
 
@@ -317,9 +323,9 @@ The processing steps within an RBE2/ENDRBE2 bracket with the same nesting index 
 
 The spatial processing plane RBE2 can generally be nested. However, only one nesting level is possible at present.
 
-Rotations around alpha, gamma and delta follow movements in the X, Y and Z direction. The dependency of the angles is as follows: delta is dependent on gamma, gamma is dependent on alpha.
+Rotations around α, γ and δ are evaluated after the translational offsets. The dependency of the angles is as follows: δ is dependent on γ, γ is dependent on α.
 
-Alpha describes a rotation around the Z axis, gamma a rotation around the X axis, and delta a rotation around the z" axis. In each case the rotation is in the mathematically positive direction, i.e. for a coordinate arrow directed towards itself, counter-clockwise.
+α rotates around the global Z axis, γ rotates around the already transformed X' axis, and δ rotates around the resulting Z'' axis. In each case the rotation is in the mathematically positive direction, i.e. for a coordinate arrow directed towards itself, counter-clockwise.
 
 The depth of eroding processing must be specified as a positive value. The processing operates counter to the z" axis of the new coordinate system drawn out. Specifications of the length refer to the x" axis, width specifications to the y" axis.
 
@@ -616,6 +622,10 @@ The control code of a blocked surface qualifies the blocked surface for...
 
 Starting from the image under 1.3.5, the transformation from Figure a.) to Figure b.) arises through the positive angle α. The transformation from b.) to c.) arises through the positive angle γ. A positive angle δ would rotate the plane from Figure c.) around the already transformed Z" axis again.
 
+### 6.2 Sawing operations (removed)
+
+The original specification describes saw-based processing (SG, PSG) in this section. Those operations were intentionally excluded from the streamlined text.
+
 ### 6.3 Tilt angle for polygon points PP, KB, and MP
 
 The tilt angle of a polygon point always references to the tangent of the processing line in the processing direction at this point.
@@ -652,7 +662,7 @@ ANR Order 1834;
 ELB GABLE;
 ELN gi003686;
 ZNR 4921;
-SERIES 1;
+REIHE 1;
 ELA INSIDE;
 ELM 8144, 2852, 192, 1;
 CAD

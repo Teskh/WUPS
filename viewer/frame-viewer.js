@@ -6,6 +6,7 @@ import {
   createMemberMesh,
   createSheathingMesh,
   createNailRowMesh,
+  createBoyOperationMesh,
   createPafMeshes,
   estimateSheathingTopZ
 } from "./geometry.js";
@@ -53,6 +54,7 @@ export class FrameViewer {
       framing: new THREE.Group(),
       sheathing: new THREE.Group(),
       nailRows: new THREE.Group(),
+      boyOperations: new THREE.Group(),
       pafRoutings: new THREE.Group()
     };
 
@@ -60,6 +62,7 @@ export class FrameViewer {
       this.groups.framing,
       this.groups.sheathing,
       this.groups.nailRows,
+      this.groups.boyOperations,
       this.groups.pafRoutings
     );
 
@@ -126,6 +129,7 @@ export class FrameViewer {
     clearGroup(this.groups.framing);
     clearGroup(this.groups.sheathing);
     clearGroup(this.groups.nailRows);
+    clearGroup(this.groups.boyOperations);
     clearGroup(this.groups.pafRoutings);
 
     const offsets = { minX, minY, width: wallWidth, height: wallHeight };
@@ -136,7 +140,8 @@ export class FrameViewer {
       scale,
       offsets,
       wallThickness,
-      wallSide
+      wallSide,
+      plates: model.plates ?? []
     };
 
     for (const plate of model.plates ?? []) {
@@ -171,6 +176,13 @@ export class FrameViewer {
       const mesh = createNailRowMesh(row, baseContext);
       if (mesh) {
         this.groups.nailRows.add(mesh);
+      }
+    }
+
+    for (const operation of model.boyOperations ?? []) {
+      const mesh = createBoyOperationMesh(operation, baseContext);
+      if (mesh) {
+        this.groups.boyOperations.add(mesh);
       }
     }
 

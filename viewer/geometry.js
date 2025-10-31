@@ -196,6 +196,80 @@ export function createNailRowMesh(row, context) {
   return instanced;
 }
 
+export function createBoyOperationMesh(operation, context) {
+  const {
+    materials,
+    highlightMaterials,
+    scale,
+    offsets,
+    wallThickness,
+    wallSide,
+    plates
+  } = context;
+  if (!materials?.boyOperation || !highlightMaterials?.boyOperation) {
+    return null;
+  }
+  if (!operation) {
+    return null;
+  }
+  const x = Number.isFinite(operation.x) ? operation.x : null;
+  const z = Number.isFinite(operation.z) ? operation.z : null;
+  if (x === null || z === null) {
+    return null;
+  }
+
+  const diameterMm = Number.isFinite(operation.diameter) ? Math.max(operation.diameter, 0.5) : 20;
+  const radiusMm = diameterMm / 2;
+
+  const thicknessMm = Number.isFinite(wallThickness) && wallThickness > 0 ? wallThickness : 90;
+  const rawDepth = Number.isFinite(operation.depth) ? operation.depth : null;
+  const rawDirection =
+    rawDepth && Math.abs(rawDepth) > 1e-6 ? Math.sign(rawDepth) : wallSide >= 0 ? 1 : -1;
+  const direction = rawDirection === 0 ? 1 : rawDirection;
+
+  const metrics = computePlateMetrics(plates);
+  const candidatePlate = resolveBoyPlate(operation, plates, direction, metrics);
+  const plateHeight = Number.isFinite(candidatePlate?.height)
+    ? candidatePlate.height
+    : metrics.defaultHeight;
+  const depthMagnitude =
+    rawDepth === null || Math.abs(rawDepth) < 1e-6
+      ? plateHeight
+      : Math.min(Math.abs(rawDepth), plateHeight);
+
+  const entryYmm = resolveBoyEntryY(candidatePlate, direction, metrics);
+  const centerYmm = entryYmm + direction * (depthMagnitude / 2);
+
+  const wallDir = wallSide >= 0 ? 1 : -1;
+  const clampedZ = clamp(operation.z, 0, thicknessMm);
+  const worldZ = (clampedZ - thicknessMm / 2) * wallDir * scale;
+
+  const worldX = toWorldX(operation.x, offsets, scale);
+  const worldY = toWorldY(centerYmm, offsets, scale);
+  const radiusWorld = Math.max(radiusMm * scale, scale * 2);
+  const depthWorld = Math.max(depthMagnitude * scale, scale * 2);
+
+  const geometry = new THREE.CylinderGeometry(radiusWorld, radiusWorld, depthWorld, 24);
+
+  const mesh = new THREE.Mesh(geometry, materials.boyOperation);
+  mesh.position.set(worldX, worldY, worldZ);
+  mesh.userData.kind = "boy";
+  mesh.userData.operation = operation;
+  mesh.userData.plate = candidatePlate ?? null;
+  mesh.userData.originalMaterial = materials.boyOperation;
+  mesh.userData.setHoverState = state => {
+    mesh.material = state ? highlightMaterials.boyOperation : materials.boyOperation;
+  };
+  mesh.userData.depthInfo = {
+    direction,
+    depth: depthMagnitude,
+    entryY: entryYmm,
+    directionLabel: direction >= 0 ? "+Y" : "-Y"
+  };
+
+  return mesh;
+}
+
 export function createPafMeshes(routing, context) {
   const {
     materials,
@@ -230,6 +304,138 @@ export function createPafMeshes(routing, context) {
     }
   }
   return meshes;
+}
+
+function computePlateMetrics(plates) {
+  const metrics = {
+    top: null,
+    bottom: null,
+    defaultHeight: 45
+  };
+  if (!Array.isArray(plates)) {
+    return metrics;
+  }
+  let heightSum = 0;
+  let count = 0;
+  for (const plate of plates) {
+    if (!Number.isFinite(plate?.y)) {
+      continue;
+    }
+    const bottom = plate.y;
+    const height = Number.isFinite(plate?.height) ? plate.height : 0;
+    const top = bottom + height;
+    metrics.bottom = metrics.bottom === null ? bottom : Math.min(metrics.bottom, bottom);
+    metrics.top = metrics.top === null ? top : Math.max(metrics.top, top);
+    if (Number.isFinite(height) && height > 0) {
+      heightSum += height;
+      count += 1;
+    }
+  }
+  if (count > 0) {
+    metrics.defaultHeight = heightSum / count;
+  }
+  return metrics;
+}
+
+function resolveBoyPlate(operation, plates, direction, metrics) {
+  if (!Array.isArray(plates) || plates.length === 0) {
+    return null;
+  }
+  const x = Number.isFinite(operation?.x) ? operation.x : null;
+  const tolerance = 5;
+  let pool = plates;
+  if (x !== null) {
+    const filtered = plates.filter(plate => {
+      if (!Number.isFinite(plate?.x) || !Number.isFinite(plate?.width)) {
+        return false;
+      }
+      const minX = plate.x - tolerance;
+      const maxX = plate.x + plate.width + tolerance;
+      return x >= minX && x <= maxX;
+    });
+    if (filtered.length > 0) {
+      pool = filtered;
+    }
+  }
+
+  const target = direction < 0 ? metrics?.top : metrics?.bottom;
+  let best = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const plate of pool) {
+    const bottom = Number.isFinite(plate?.y) ? plate.y : 0;
+    const height = Number.isFinite(plate?.height) ? plate.height : 0;
+    const top = bottom + height;
+    const compareValue = direction < 0 ? top : bottom;
+    const diff = target === null ? 0 : Math.abs(compareValue - target);
+    let xDiff = 0;
+    if (x !== null && Number.isFinite(plate?.x) && Number.isFinite(plate?.width)) {
+      const minX = plate.x;
+      const maxX = plate.x + plate.width;
+      if (x < minX) {
+        xDiff = minX - x;
+      } else if (x > maxX) {
+        xDiff = x - maxX;
+      }
+    }
+    const score = diff * 10 + xDiff;
+    if (score < bestScore) {
+      bestScore = score;
+      best = plate;
+    }
+  }
+  return best;
+}
+
+function resolveBoyEntryY(plate, direction, metrics) {
+  if (plate && Number.isFinite(plate?.y)) {
+    if (direction >= 0) {
+      return plate.y;
+    }
+    const height = Number.isFinite(plate?.height) ? plate.height : 0;
+    return plate.y + height;
+  }
+
+  if (direction >= 0) {
+    if (Number.isFinite(metrics?.bottom)) {
+      return metrics.bottom;
+    }
+    if (Number.isFinite(metrics?.top)) {
+      return metrics.top;
+    }
+    return 0;
+  }
+
+  if (Number.isFinite(metrics?.top)) {
+    return metrics.top;
+  }
+  if (Number.isFinite(metrics?.bottom)) {
+    return metrics.bottom;
+  }
+  return 0;
+}
+
+function clamp(value, min, max) {
+  if (!Number.isFinite(value)) {
+    return Number.isFinite(min) ? min : 0;
+  }
+  let result = value;
+  if (Number.isFinite(min) && result < min) {
+    result = min;
+  }
+  if (Number.isFinite(max) && result > max) {
+    result = max;
+  }
+  return result;
+}
+
+function toWorldX(value, offsets, scale) {
+  const localX = value - offsets.minX;
+  return (localX - offsets.width / 2) * scale;
+}
+
+function toWorldY(value, offsets, scale) {
+  const localY = value - offsets.minY;
+  return (localY - offsets.height / 2) * scale;
 }
 
 function convertPointToWorld(point, offsets, scale) {

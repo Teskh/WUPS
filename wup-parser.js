@@ -19,6 +19,7 @@ export function parseWup(wupText) {
     sheathing: [],
     nailRows: [],
     pafRoutings: [],
+    boyOperations: [],
     bounds: { ...DEFAULT_BOUNDS },
     unhandled: []
   };
@@ -311,6 +312,31 @@ export function parseWup(wupText) {
           model.nailRows.push(row);
           extendBoundsPoint(model.bounds, row.start.x, row.start.y);
           extendBoundsPoint(model.bounds, row.end.x, row.end.y);
+      }
+      break;
+    }
+    case "BOY": {
+      if (numbers.length >= 4) {
+        const [xRaw, zRaw, diameterRaw, depthRaw] = numbers;
+        if (Number.isFinite(xRaw) && Number.isFinite(zRaw)) {
+          const diameter = Number.isFinite(diameterRaw) ? Math.abs(diameterRaw) : null;
+          const depth = Number.isFinite(depthRaw) ? depthRaw : null;
+          const operation = {
+            x: xRaw,
+            z: zRaw,
+            diameter,
+            depth,
+            source: numbers
+          };
+          model.boyOperations.push(operation);
+          const radius = Number.isFinite(diameter) ? diameter / 2 : 0;
+          extendBoundsPoint(model.bounds, operation.x - radius, operation.z);
+          extendBoundsPoint(model.bounds, operation.x + radius, operation.z);
+        } else {
+          model.unhandled.push({ command, numbers, body });
+        }
+      } else {
+        model.unhandled.push({ command, numbers, body });
       }
       break;
     }
