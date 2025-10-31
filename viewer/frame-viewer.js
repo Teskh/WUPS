@@ -32,31 +32,12 @@ export class FrameViewer {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xf1f4f9);
 
-    this.camera = new THREE.PerspectiveCamera(
-      36,
-      canvas.clientWidth / Math.max(canvas.clientHeight, 1),
-      0.1,
-      2000
-    );
-    this.camera.position.set(0, 0, 10);
-
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.12;
-    this.controls.enableRotate = true;
-    this.controls.enablePan = true;
-    this.controls.enableZoom = true;
-    this.controls.panSpeed = 0.9;
-    this.controls.rotateSpeed = 0.65;
-    this.controls.zoomSpeed = 1.0;
-    this.controls.screenSpacePanning = true;
-    this.controls.mouseButtons = {
-      LEFT: THREE.MOUSE.PAN,
-      MIDDLE: THREE.MOUSE.DOLLY,
-      RIGHT: THREE.MOUSE.ROTATE
-    };
-    this.controls.target.set(0, 0, 0);
-    this.controls.update();
+    this.perspectiveFov = 36;
+    this.wallDir = 1;
+    this.activeFace = "pli";
+    this.projectionMode = "orthographic";
+    this.camera = null;
+    this.controls = null;
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x48505a, 0.85);
     this.scene.add(hemiLight);
@@ -103,12 +84,13 @@ export class FrameViewer {
     this.requestRender = this.requestRender.bind(this);
     this.animate = this.animate.bind(this);
 
+    this.setProjectionMode(this.projectionMode);
+
     canvas.addEventListener("mousemove", this.handlePointerMove);
     canvas.addEventListener("mouseleave", this.handlePointerLeave);
     canvas.addEventListener("contextmenu", this.handleContextMenu);
     window.addEventListener("resize", this.handleResize);
     window.addEventListener("keydown", this.handleKeyDown);
-    this.controls.addEventListener("change", this.requestRender);
 
     this.resizeRenderer();
     this.animate();
@@ -125,6 +107,7 @@ export class FrameViewer {
     const wallHeight = model.wall?.height ?? model.bounds.maxY - minY;
     const wallThickness = model.wall?.thickness ?? 90;
     const wallSide = Number.isFinite(model.wall?.side) ? (model.wall.side >= 0 ? 1 : -1) : 1;
+    this.wallDir = wallSide >= 0 ? 1 : -1;
     const sheathingSurfaces = estimateSheathingTopZ(
       model.sheathing ?? [],
       wallThickness,
@@ -265,8 +248,18 @@ export class FrameViewer {
   }
 
   handleKeyDown(event) {
-    if (event.key === "1") {
-      this.resetView();
+    switch (event.key) {
+      case "1":
+        this.resetViewToFace("pli");
+        break;
+      case "2":
+        this.resetViewToFace("pla");
+        break;
+      case "3":
+        this.toggleProjectionMode();
+        break;
+      default:
+        break;
     }
   }
 
@@ -277,26 +270,27 @@ export class FrameViewer {
       return;
     }
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    this.updateCameraProjection();
     this.requestRender();
   }
 
   adjustCamera(width, height) {
     const diag = Math.sqrt(width * width + height * height);
     const halfDiag = diag / 2 || 1;
-    const distance = halfDiag / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
-    const safeDistance = distance * 1.4 + 2;
+    const fovRadians = THREE.MathUtils.degToRad(this.perspectiveFov / 2);
+    const baseDistance = Math.max(halfDiag / Math.tan(fovRadians), 1);
+    const safeDistance = baseDistance * 1.4 + 2;
+
+    this.cachedDimensions.width = width;
+    this.cachedDimensions.height = height;
     this.cachedDimensions.cameraDistance = safeDistance;
 
-    this.camera.position.set(0, 0, safeDistance);
-    this.camera.near = Math.max(safeDistance * 0.02, 0.1);
-    this.camera.far = Math.max(safeDistance * 6, 100);
-    this.camera.updateProjectionMatrix();
+    if (this.camera?.isOrthographicCamera) {
+      this.camera.zoom = 1;
+    }
 
-    this.controls.target.set(0, 0, 0);
-    this.controls.update();
-    this.controls.saveState();
+    this.updateCameraProjection();
+    this.positionCameraForFace(this.activeFace);
     this.requestRender();
   }
 
@@ -330,10 +324,153 @@ export class FrameViewer {
     this.requestRender();
   }
 
-  resetView() {
-    this.controls.reset();
+  resetViewToFace(face) {
     this.clearHoverState();
+    this.positionCameraForFace(face);
+  }
+
+  resetView() {
+    this.resetViewToFace("pli");
+  }
+
+  setProjectionMode(mode) {
+    const targetMode = mode === "perspective" ? "perspective" : "orthographic";
+    if (this.projectionMode === targetMode && this.camera) {
+      return;
+    }
+
+    const aspect = this.getCanvasAspect();
+    let newCamera;
+    if (targetMode === "orthographic") {
+      const frustumSize = Math.max(this.cachedDimensions.width || 8, this.cachedDimensions.height || 8) + 4;
+      const halfHeight = frustumSize / 2;
+      const halfWidth = halfHeight * aspect;
+      newCamera = new THREE.OrthographicCamera(
+        -halfWidth,
+        halfWidth,
+        halfHeight,
+        -halfHeight,
+        -5000,
+        5000
+      );
+    } else {
+      newCamera = new THREE.PerspectiveCamera(this.perspectiveFov, aspect, 0.1, 2000);
+    }
+
+    if (this.controls) {
+      this.controls.removeEventListener("change", this.requestRender);
+      this.controls.dispose();
+    }
+
+    this.camera = newCamera;
+    this.camera.position.set(0, 0, this.cachedDimensions.cameraDistance);
+    this.camera.up.set(0, 1, 0);
+
+    this.controls = new OrbitControls(this.camera, this.canvas);
+    this.configureControls();
+
+    this.projectionMode = targetMode;
+    if (this.camera.isOrthographicCamera) {
+      this.camera.zoom = 1;
+    }
+    this.updateCameraProjection();
+    this.positionCameraForFace(this.activeFace);
+    this.notifyProjectionModeChange();
+  }
+
+  toggleProjectionMode() {
+    const next = this.projectionMode === "orthographic" ? "perspective" : "orthographic";
+    this.setProjectionMode(next);
+  }
+
+  getProjectionMode() {
+    return this.projectionMode;
+  }
+
+  configureControls() {
+    if (!this.controls) {
+      return;
+    }
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.12;
+    this.controls.enableRotate = true;
+    this.controls.enablePan = true;
+    this.controls.enableZoom = true;
+    this.controls.panSpeed = 0.9;
+    this.controls.rotateSpeed = 0.65;
+    this.controls.zoomSpeed = 1.0;
+    this.controls.screenSpacePanning = true;
+    this.controls.mouseButtons = {
+      LEFT: THREE.MOUSE.PAN,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.ROTATE
+    };
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
+    this.controls.addEventListener("change", this.requestRender);
+  }
+
+  getCanvasAspect() {
+    const width = this.canvas.clientWidth || 1;
+    const height = this.canvas.clientHeight || 1;
+    return width / height;
+  }
+
+  updateCameraProjection() {
+    if (!this.camera) {
+      return;
+    }
+    const aspect = this.getCanvasAspect();
+    if (this.camera.isPerspectiveCamera) {
+      this.camera.aspect = aspect;
+      const distance = this.cachedDimensions.cameraDistance || 10;
+      this.camera.near = Math.max(distance * 0.02, 0.1);
+      this.camera.far = Math.max(distance * 6, 100);
+      this.camera.updateProjectionMatrix();
+      return;
+    }
+
+    const width = this.cachedDimensions.width || 8;
+    const height = this.cachedDimensions.height || 8;
+    const margin = Math.max(width, height) * 0.25 + 2;
+    let halfHeight = height / 2 + margin;
+    let halfWidth = width / 2 + margin;
+    if (halfWidth / halfHeight > aspect) {
+      halfHeight = halfWidth / aspect;
+    } else {
+      halfWidth = halfHeight * aspect;
+    }
+    this.camera.left = -halfWidth;
+    this.camera.right = halfWidth;
+    this.camera.top = halfHeight;
+    this.camera.bottom = -halfHeight;
+
+    const distance = this.cachedDimensions.cameraDistance || 10;
+    const span = distance * 2 + margin * 4;
+    this.camera.near = 0.1;
+    this.camera.far = Math.max(span, distance * 3);
+    this.camera.updateProjectionMatrix();
+  }
+
+  positionCameraForFace(face) {
+    const resolved = face === "pla" ? "pla" : "pli";
+    this.activeFace = resolved;
+    const direction = resolved === "pli" ? this.wallDir : -this.wallDir;
+    const distance = this.cachedDimensions.cameraDistance || 10;
+    if (this.camera) {
+      this.camera.position.set(0, 0, direction * distance);
+    }
+    if (this.controls) {
+      this.controls.target.set(0, 0, 0);
+      this.controls.update();
+    }
     this.requestRender();
+  }
+
+  notifyProjectionModeChange() {
+    if (typeof this.onProjectionModeChange === "function") {
+      this.onProjectionModeChange(this.projectionMode);
+    }
   }
 
   requestRender() {

@@ -13,6 +13,26 @@ if (typeof window !== "undefined") {
   window.__frameViewer = viewer;
 }
 
+const projectionToggle = document.getElementById("toggleProjection");
+if (projectionToggle) {
+  const updateProjectionButton = mode => {
+    if (mode === "orthographic") {
+      projectionToggle.textContent = "Switch to perspective view";
+      projectionToggle.setAttribute("aria-label", "Switch to perspective view");
+    } else {
+      projectionToggle.textContent = "Switch to orthographic view";
+      projectionToggle.setAttribute("aria-label", "Switch to orthographic view");
+    }
+  };
+  projectionToggle.addEventListener("click", () => {
+    viewer.toggleProjectionMode();
+  });
+  viewer.onProjectionModeChange = mode => {
+    updateProjectionButton(mode);
+  };
+  updateProjectionButton(viewer.getProjectionMode());
+}
+
 const initialModel = window.__lastWupModel;
 if (initialModel?.model) {
   viewer.updateModel(initialModel.model);
