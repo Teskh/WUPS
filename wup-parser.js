@@ -256,14 +256,24 @@ export function parseWup(wupText) {
             };
           }
 
+          const zValue = Number.isFinite(numbers[2]) ? numbers[2] : null;
+          const offsetValue = Number.isFinite(numbers[3]) ? numbers[3] : null;
+          const orientationValue = Number.isFinite(numbers[4]) ? numbers[4] : null;
+          const trailingValue = Number.isFinite(numbers[5]) ? numbers[5] : null;
+          const depthRawValue = derivePafDepthValue(zValue, trailingValue);
+          const extras = numbers.slice(6);
+          if (Number.isFinite(trailingValue) && !Object.is(depthRawValue, trailingValue)) {
+            extras.unshift(trailingValue);
+          }
+
           const point = {
             x,
             y,
-            z: Number.isFinite(numbers[2]) ? numbers[2] : null,
-            offset: Number.isFinite(numbers[3]) ? numbers[3] : null,
-            orientation: Number.isFinite(numbers[4]) ? numbers[4] : null,
-            depthRaw: Number.isFinite(numbers[5]) ? numbers[5] : null,
-            extras: numbers.slice(6),
+            z: zValue,
+            offset: offsetValue,
+            orientation: orientationValue,
+            depthRaw: depthRawValue,
+            extras,
             source: [...numbers]
           };
 
@@ -283,7 +293,6 @@ export function parseWup(wupText) {
           if (Number.isFinite(point.z)) {
             currentPolygon.zSamples.push(point.z);
           }
-
           extendBoundsPoint(model.bounds, point.x, point.y);
         } else {
           model.unhandled.push({ command, numbers, body });
@@ -456,6 +465,30 @@ function isClosedLoop(points) {
 
 function isApproximatelyEqual(a, b) {
   return Math.abs(a - b) < 1e-6;
+}
+
+function derivePafDepthValue(zValue, trailingValue) {
+  const hasZ = Number.isFinite(zValue);
+  const hasTrailing = Number.isFinite(trailingValue);
+  if (!hasZ && !hasTrailing) {
+    return null;
+  }
+  if (hasZ && (!hasTrailing || Math.abs(zValue) > 1e-6)) {
+    return zValue;
+  }
+  if (!hasZ) {
+    return trailingValue;
+  }
+  if (!hasTrailing) {
+    return zValue;
+  }
+  if (Math.abs(zValue) <= 1e-6 && Math.abs(trailingValue) > Math.abs(zValue)) {
+    return trailingValue;
+  }
+  if (Math.abs(trailingValue) <= 1e-6 && Math.abs(zValue) > Math.abs(trailingValue)) {
+    return zValue;
+  }
+  return Math.abs(zValue) <= Math.abs(trailingValue) ? zValue : trailingValue;
 }
 
 function averageOrNull(values, mapFn = v => v) {
