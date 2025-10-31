@@ -6,14 +6,23 @@ export function calculateScale(width, height) {
 }
 
 export function estimateSheathingTopZ(panels, wallThickness, wallSide) {
-  const faceDir = wallSide >= 0 ? 1 : -1;
+  const wallDir = wallSide >= 0 ? 1 : -1;
+  const epsilon = 0.6;
+  const defaults = {
+    positive: wallDir * (wallThickness / 2 + epsilon),
+    negative: -wallDir * (wallThickness / 2 + epsilon)
+  };
   if (!Array.isArray(panels) || panels.length === 0) {
-    const epsilon = 0.6;
-    return faceDir * (wallThickness / 2 + epsilon);
+    return defaults;
   }
-  let extremum = null;
+  let positiveExtremum = null;
+  let negativeExtremum = null;
   for (const panel of panels) {
     const thickness = Number.isFinite(panel?.thickness) ? panel.thickness : wallThickness;
+    if (!Number.isFinite(thickness)) {
+      continue;
+    }
+    const faceDir = resolvePanelFaceDirection(panel, wallSide);
     const centerZ = computePanelZ(panel, wallThickness, wallSide);
     if (!Number.isFinite(centerZ)) {
       continue;
@@ -22,19 +31,16 @@ export function estimateSheathingTopZ(panels, wallThickness, wallSide) {
     if (!Number.isFinite(top)) {
       continue;
     }
-    if (extremum === null) {
-      extremum = top;
-    } else if (faceDir >= 0) {
-      extremum = Math.max(extremum, top);
+    if (faceDir >= 0) {
+      positiveExtremum = positiveExtremum === null ? top : Math.max(positiveExtremum, top);
     } else {
-      extremum = Math.min(extremum, top);
+      negativeExtremum = negativeExtremum === null ? top : Math.min(negativeExtremum, top);
     }
   }
-  if (extremum === null) {
-    const epsilon = 0.6;
-    return faceDir * (wallThickness / 2 + epsilon);
-  }
-  return extremum;
+  return {
+    positive: positiveExtremum ?? defaults.positive,
+    negative: negativeExtremum ?? defaults.negative
+  };
 }
 
 export function createMemberMesh(element, kind, context) {
@@ -198,7 +204,7 @@ export function createPafMeshes(routing, context) {
     offsets,
     wallThickness,
     wallSide,
-    sheathingTopZMm
+    sheathingSurfaces
   } = context;
   if (!materials?.pafRouting || !highlightMaterials?.pafRouting) {
     return [];
@@ -215,7 +221,7 @@ export function createPafMeshes(routing, context) {
       offsets,
       wallThickness,
       wallSide,
-      sheathingTopZMm
+      sheathingSurfaces
     });
     if (mesh) {
       meshes.push(mesh);
@@ -267,8 +273,11 @@ function dedupeSequentialPoints(points) {
 }
 
 function computePanelZ(panel, wallThickness, wallSide = 1) {
-  const thickness = Number.isFinite(panel.thickness) ? panel.thickness : wallThickness;
-  const faceDir = wallSide >= 0 ? 1 : -1;
+  const thickness = Number.isFinite(panel?.thickness) ? panel.thickness : wallThickness;
+  if (!Number.isFinite(thickness) || thickness <= 0) {
+    return 0;
+  }
+  const faceDir = resolvePanelFaceDirection(panel, wallSide);
   const halfWall = wallThickness / 2;
   const flushOffset = faceDir * (halfWall - thickness / 2);
   const epsilon = 0.6;
@@ -296,6 +305,22 @@ function computeNailRowZ(wallThickness, wallSide) {
   const halfWall = wallThickness / 2;
   const dir = wallSide >= 0 ? 1 : -1;
   return dir * (halfWall + epsilon);
+}
+
+function resolvePanelFaceDirection(panel, wallSide) {
+  const wallDir = wallSide >= 0 ? 1 : -1;
+  const panelDirRaw = Number.isFinite(panel?.faceDirection) ? panel.faceDirection : 1;
+  const panelDir = panelDirRaw >= 0 ? 1 : -1;
+  return wallDir * panelDir;
+}
+
+function resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness) {
+  if (faceDir >= 0) {
+    const positive = sheathingSurfaces?.positive;
+    return Number.isFinite(positive) ? positive : faceDir * (wallThickness / 2);
+  }
+  const negative = sheathingSurfaces?.negative;
+  return Number.isFinite(negative) ? negative : faceDir * (wallThickness / 2);
 }
 
 function determinePafFaceDirection(faceValue, wallSide) {
@@ -327,7 +352,15 @@ function resolvePafSegmentDepthMm(segment, wallThickness) {
 }
 
 function createPafSegmentMesh(segment, routing, context) {
-  const { materials, highlightMaterials, scale, offsets, wallThickness, wallSide, sheathingTopZMm } = context;
+  const {
+    materials,
+    highlightMaterials,
+    scale,
+    offsets,
+    wallThickness,
+    wallSide,
+    sheathingSurfaces
+  } = context;
   if (segment?.kind === "polygon") {
     return createPafPolygonMesh(segment, routing, context);
   }
@@ -352,9 +385,7 @@ function createPafSegmentMesh(segment, routing, context) {
   })();
   const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
 
-  const surfaceZMm = Number.isFinite(sheathingTopZMm)
-    ? sheathingTopZMm
-    : faceDir * (wallThickness / 2);
+  const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness);
   const tinyLift = 0.05;
   const topZMm = surfaceZMm + faceDir * tinyLift;
   const centerZMm = topZMm - faceDir * depthMm / 2;
@@ -386,7 +417,7 @@ function createPafPolygonMesh(segment, routing, context) {
     offsets,
     wallThickness,
     wallSide,
-    sheathingTopZMm
+    sheathingSurfaces
   } = context;
   const points = Array.isArray(segment?.points) ? segment.points : null;
   if (!points || points.length < 3) {
@@ -421,9 +452,7 @@ function createPafPolygonMesh(segment, routing, context) {
   geometry.translate(0, 0, -depthWorld / 2);
 
   const faceDir = determinePafFaceDirection(routing.face, wallSide);
-  const surfaceZMm = Number.isFinite(sheathingTopZMm)
-    ? sheathingTopZMm
-    : faceDir * (wallThickness / 2);
+  const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness);
   const tinyLift = 0.05;
   const topZMm = surfaceZMm + faceDir * tinyLift;
   const centerZMm = topZMm - faceDir * (depthMm / 2);

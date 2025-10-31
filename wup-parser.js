@@ -201,10 +201,12 @@ export function parseWup(wupText) {
         }
         break;
       }
-      case "PLI1": {
+      case "PLI1":
+      case "PLA1": {
         if (numbers.length >= 6) {
           const materialToken = extractFirstStringToken(body);
           const rotation = numbers[6] ?? 0;
+          const faceDirection = command.startsWith("PLA") ? -1 : 1;
           const panel = {
             width: numbers[0],
             height: numbers[1],
@@ -214,6 +216,7 @@ export function parseWup(wupText) {
             offset: numbers[5] ?? 0,
             rotation,
             material: materialToken ?? null,
+            faceDirection,
             points: [],
             source: numbers
           };

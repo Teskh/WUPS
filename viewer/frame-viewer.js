@@ -125,7 +125,11 @@ export class FrameViewer {
     const wallHeight = model.wall?.height ?? model.bounds.maxY - minY;
     const wallThickness = model.wall?.thickness ?? 90;
     const wallSide = Number.isFinite(model.wall?.side) ? (model.wall.side >= 0 ? 1 : -1) : 1;
-    const sheathingTopZMm = estimateSheathingTopZ(model.sheathing ?? [], wallThickness, wallSide);
+    const sheathingSurfaces = estimateSheathingTopZ(
+      model.sheathing ?? [],
+      wallThickness,
+      wallSide
+    );
 
     const scale = calculateScale(wallWidth, wallHeight);
     this.cachedDimensions = {
@@ -190,7 +194,7 @@ export class FrameViewer {
     for (const routing of model.pafRoutings ?? []) {
       const meshes = createPafMeshes(routing, {
         ...baseContext,
-        sheathingTopZMm
+        sheathingSurfaces
       });
       for (const mesh of meshes) {
         this.groups.pafRoutings.add(mesh);
