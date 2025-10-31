@@ -54,7 +54,7 @@ export function createMemberMesh(element, kind, context) {
   const localX = element.x - minX;
   const localY = element.y - minY;
   const centerX = (localX + element.width / 2 - width / 2) * scale;
-  const centerY = (height / 2 - (localY + element.height / 2)) * scale;
+  const centerY = (localY + element.height / 2 - height / 2) * scale;
 
   const depthSource = element.source?.[2];
   const depthMm = Number.isFinite(depthSource) ? depthSource : wallThickness;
@@ -236,7 +236,7 @@ function convertPointToWorld(point, offsets, scale) {
   const localX = point.x - offsets.minX;
   const localY = point.y - offsets.minY;
   const worldX = (localX - offsets.width / 2) * scale;
-  const worldY = (offsets.height / 2 - localY) * scale;
+  const worldY = (localY - offsets.height / 2) * scale;
   return new THREE.Vector2(worldX, worldY);
 }
 
