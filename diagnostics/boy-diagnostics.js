@@ -22,6 +22,7 @@ export function runBoyDiagnostics(model) {
   const plates = model.plates || [];
   const wallThickness = model.wall?.thickness || 90;
   const wallSide = model.wall?.side ?? 1;
+  const wallHeight = model.wall?.height || model.view?.height || 2400;
 
   // All framing elements that BOY operations might be associated with
   const framingElements = [...studs, ...blocking, ...plates];
@@ -55,10 +56,10 @@ export function runBoyDiagnostics(model) {
     const boyId = `BOY #${index + 1} (x=${boy.x.toFixed(1)}, z=${boy.z.toFixed(1)})`;
 
     // Find associated framing element
-    const associatedElement = findAssociatedElement(boy, framingElements, wallThickness, wallSide);
+    const associatedElement = findAssociatedElement(boy, framingElements, wallThickness, wallSide, wallHeight);
 
     // Check 1: Direction (faces inward)
-    const directionResult = checkDirection(boy, associatedElement, wallThickness, wallSide);
+    const directionResult = checkDirection(boy, associatedElement, wallThickness, wallSide, wallHeight);
     results.checks[0].results.push({
       id: boyId,
       boy,
@@ -104,22 +105,17 @@ export function runBoyDiagnostics(model) {
 
 /**
  * Find the framing element (stud, joist, or plate) associated with a BOY operation
+ * This matches the logic in viewer/geometry.js:resolveBoyPlate
  */
-function findAssociatedElement(boy, framingElements, wallThickness, wallSide) {
+function findAssociatedElement(boy, framingElements, wallThickness, wallSide, wallHeight) {
   const tolerance = 5; // mm tolerance for finding associated element
-
-  // For BOY operations, we primarily look at the X position and the Y position
-  // BOY is positioned at (x, z) where z is through the wall thickness
-  // The depth determines which plate (top or bottom) it's associated with
-
   const direction = determineDirection(boy, wallThickness, wallSide);
 
-  // Find elements that contain the BOY's X position
+  // Filter elements that contain the BOY's X position
   const candidates = framingElements.filter(elem => {
     if (!Number.isFinite(elem.x) || !Number.isFinite(elem.width)) {
       return false;
     }
-
     const minX = elem.x - tolerance;
     const maxX = elem.x + elem.width + tolerance;
     return boy.x >= minX && boy.x <= maxX;
@@ -129,16 +125,44 @@ function findAssociatedElement(boy, framingElements, wallThickness, wallSide) {
     return null;
   }
 
-  // Prefer the closest element
+  // Calculate plate metrics to find top/bottom positions
+  let topY = null;
+  let bottomY = null;
+  for (const elem of candidates) {
+    if (!Number.isFinite(elem.y) || !Number.isFinite(elem.height)) {
+      continue;
+    }
+    const bottom = elem.y;
+    const top = elem.y + elem.height;
+    bottomY = bottomY === null ? bottom : Math.min(bottomY, bottom);
+    topY = topY === null ? top : Math.max(topY, top);
+  }
+
+  // Match geometry.js logic: direction < 0 looks for top, direction >= 0 looks for bottom
+  const targetY = direction < 0 ? topY : bottomY;
+
+  // Find the element closest to the target
   let best = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestScore = Number.POSITIVE_INFINITY;
 
   for (const elem of candidates) {
-    const elemCenterX = elem.x + elem.width / 2;
-    const distance = Math.abs(boy.x - elemCenterX);
+    if (!Number.isFinite(elem.y) || !Number.isFinite(elem.height)) {
+      continue;
+    }
 
-    if (distance < bestDistance) {
-      bestDistance = distance;
+    const bottom = elem.y;
+    const top = elem.y + elem.height;
+    const compareValue = direction < 0 ? top : bottom;
+    const yDiff = targetY === null ? 0 : Math.abs(compareValue - targetY);
+
+    // Also consider X distance for tie-breaking
+    const elemCenterX = elem.x + elem.width / 2;
+    const xDiff = Math.abs(boy.x - elemCenterX);
+
+    const score = yDiff * 10 + xDiff;
+
+    if (score < bestScore) {
+      bestScore = score;
       best = elem;
     }
   }
@@ -160,7 +184,7 @@ function determineDirection(boy, wallThickness, wallSide) {
 /**
  * Check 1: BOY faces inward toward the element
  */
-function checkDirection(boy, element, wallThickness, wallSide) {
+function checkDirection(boy, element, wallThickness, wallSide, wallHeight) {
   const direction = determineDirection(boy, wallThickness, wallSide);
   const directionLabel = direction >= 0 ? "+Y" : "-Y";
 
@@ -175,26 +199,34 @@ function checkDirection(boy, element, wallThickness, wallSide) {
     };
   }
 
-  // For plates: +Y direction should be used for bottom plates, -Y for top plates
-  // Bottom plates are at lower Y values, top plates at higher Y values
+  // BOY drilling logic (from geometry.js):
+  // - Negative depth (-Y): drills downward from TOP plate
+  // - Positive depth (+Y): drills upward from BOTTOM plate
+  // Bottom plates are at lower Y values (near 0), top plates at higher Y values (near wallHeight)
   const elementCenterY = element.y + element.height / 2;
-  const wallCenterY = (wallThickness / 2); // Approximate wall center
+  const wallCenterY = wallHeight / 2;
 
-  // Determine if this is likely a top or bottom plate/element
-  const isLikelyTopElement = elementCenterY > wallCenterY;
-  const expectedDirection = isLikelyTopElement ? -1 : 1;
+  // Determine if this element is actually a top or bottom plate
+  const isTopPlate = elementCenterY > wallCenterY;
 
-  const passed = direction === expectedDirection;
+  // Determine which type of plate this direction should be used with
+  const shouldBeOnTopPlate = direction < 0; // negative = top, positive = bottom
+
+  // Check if the BOY is associated with the correct plate type
+  const passed = isTopPlate === shouldBeOnTopPlate;
 
   return {
     passed,
     message: passed
-      ? `Correct direction (${directionLabel})`
-      : `Incorrect direction (${directionLabel}), expected ${expectedDirection >= 0 ? '+Y' : '-Y'} for ${isLikelyTopElement ? 'top' : 'bottom'} element`,
+      ? `Correct (${directionLabel} direction on ${isTopPlate ? 'top' : 'bottom'} plate)`
+      : `Incorrect (${directionLabel} direction on ${isTopPlate ? 'top' : 'bottom'} plate, expected on ${shouldBeOnTopPlate ? 'top' : 'bottom'} plate)`,
     details: {
       direction: directionLabel,
       elementY: elementCenterY.toFixed(1),
-      isTopElement: isLikelyTopElement,
+      wallHeight: wallHeight.toFixed(1),
+      wallCenterY: wallCenterY.toFixed(1),
+      isTopPlate,
+      shouldBeOnTopPlate,
       depth: boy.depth
     }
   };
