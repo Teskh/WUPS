@@ -238,17 +238,31 @@ export function createBoyOperationMesh(operation, context) {
 
   const thicknessMm = Number.isFinite(wallThickness) && wallThickness > 0 ? wallThickness : 90;
   const rawDepth = Number.isFinite(operation.depth) ? operation.depth : null;
+  const associatedKind = typeof operation.targetKind === "string" ? operation.targetKind : null;
+  const associatedRole = typeof operation.targetRole === "string" ? operation.targetRole : null;
+  const associatedElement = operation.targetElement ?? null;
   const rawDirection =
     rawDepth && Math.abs(rawDepth) > 1e-6 ? Math.sign(rawDepth) : wallSide >= 0 ? 1 : -1;
-  const direction = rawDirection === 0 ? 1 : rawDirection;
+  let direction = rawDirection === 0 ? 1 : rawDirection;
+  const depthHasMagnitude = Number.isFinite(rawDepth) && Math.abs(rawDepth) > 1e-6;
+  if (!depthHasMagnitude && associatedKind === "plate") {
+    if (associatedRole === "top") {
+      direction = -1;
+    } else if (associatedRole === "bottom") {
+      direction = 1;
+    }
+  }
 
   const metrics = computePlateMetrics(plates);
-  const candidatePlate = resolveBoyPlate(operation, plates, direction, metrics);
+  const candidatePlate =
+    associatedKind === "plate" && associatedElement
+      ? associatedElement
+      : resolveBoyPlate(operation, plates, direction, metrics);
   const plateHeight = Number.isFinite(candidatePlate?.height)
     ? candidatePlate.height
     : metrics.defaultHeight;
   const depthMagnitude =
-    rawDepth === null || Math.abs(rawDepth) < 1e-6
+    !depthHasMagnitude
       ? plateHeight
       : Math.min(Math.abs(rawDepth), plateHeight);
 
@@ -299,6 +313,7 @@ export function createBoyOperationMesh(operation, context) {
   group.userData.kind = "boy";
   group.userData.operation = operation;
   group.userData.plate = candidatePlate ?? null;
+  group.userData.targetRole = associatedRole ?? null;
   group.userData.originalMaterial = materials.boyOperation;
   group.userData.layer = "structure";
   group.userData.setHoverState = state => {

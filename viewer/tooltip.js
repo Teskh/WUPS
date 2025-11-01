@@ -224,20 +224,17 @@ export function formatTooltipContent(object) {
             ? "+Y"
             : "-Y"
           : null);
+      const targetRole = object.userData.targetRole ?? null;
       const entryY = Number.isFinite(depthInfo?.entryY) ? depthInfo.entryY : null;
       const plate = object.userData.plate ?? null;
       const plateLabel = (() => {
         if (!plate) {
           return null;
         }
-        const plateTop = Number.isFinite(plate.y) && Number.isFinite(plate.height) ? plate.y + plate.height : null;
-        if (!Number.isFinite(plateTop) || !Number.isFinite(plate.y)) {
-          return null;
-        }
-        if (directionLabel === "-Y") {
+        if (targetRole === "top") {
           return "top plate";
         }
-        if (directionLabel === "+Y") {
+        if (targetRole === "bottom") {
           return "bottom plate";
         }
         return null;

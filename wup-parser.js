@@ -34,6 +34,15 @@ export function parseWup(wupText) {
   let currentRouting = null;
   let currentPolygon = null;
   let activePanelLayer = null;
+  let lastBoyContext = null;
+
+  function setBoyContext(kind, role, element) {
+    if (!kind) {
+      lastBoyContext = null;
+      return;
+    }
+    lastBoyContext = { kind, role: role ?? null, element: element ?? null };
+  }
 
   function finalizePolygonSegment() {
     if (!currentPolygon) {
@@ -121,11 +130,13 @@ export function parseWup(wupText) {
             originY: numbers[4]
           };
           model.modules.push(currentModule);
+          setBoyContext(null);
         }
         break;
       }
       case "ENDMODUL": {
         currentModule = null;
+        setBoyContext(null);
         break;
       }
       case "QS": {
@@ -135,6 +146,7 @@ export function parseWup(wupText) {
           if (rect) {
             model.studs.push(rect);
             extendBounds(model.bounds, rect);
+            setBoyContext("stud", null, rect);
           }
         }
         break;
@@ -146,6 +158,7 @@ export function parseWup(wupText) {
           if (rect) {
             model.blocking.push(rect);
             extendBounds(model.bounds, rect);
+            setBoyContext("blocking", null, rect);
           }
         }
         break;
@@ -158,6 +171,7 @@ export function parseWup(wupText) {
           if (rect) {
             model.plates.push(rect);
             extendBounds(model.bounds, rect);
+            setBoyContext("plate", command === "OG" ? "top" : "bottom", rect);
           }
         }
         break;
@@ -325,30 +339,34 @@ export function parseWup(wupText) {
         break;
       }
       case "BOY": {
-      if (numbers.length >= 4) {
-        const [xRaw, zRaw, diameterRaw, depthRaw] = numbers;
-        if (Number.isFinite(xRaw) && Number.isFinite(zRaw)) {
-          const diameter = Number.isFinite(diameterRaw) ? Math.abs(diameterRaw) : null;
-          const depth = Number.isFinite(depthRaw) ? depthRaw : null;
-          const operation = {
-            x: xRaw,
-            z: zRaw,
-            diameter,
-            depth,
-            source: numbers
-          };
-          model.boyOperations.push(operation);
-          const radius = Number.isFinite(diameter) ? diameter / 2 : 0;
-          extendBoundsPoint(model.bounds, operation.x - radius, operation.z);
-          extendBoundsPoint(model.bounds, operation.x + radius, operation.z);
+        if (numbers.length >= 4) {
+          const [xRaw, zRaw, diameterRaw, depthRaw] = numbers;
+          if (Number.isFinite(xRaw) && Number.isFinite(zRaw)) {
+            const diameter = Number.isFinite(diameterRaw) ? Math.abs(diameterRaw) : null;
+            const depth = Number.isFinite(depthRaw) ? depthRaw : null;
+            const context = lastBoyContext ?? null;
+            const operation = {
+              x: xRaw,
+              z: zRaw,
+              diameter,
+              depth,
+              targetElement: context?.element ?? null,
+              targetKind: context?.kind ?? null,
+              targetRole: context?.role ?? null,
+              source: numbers
+            };
+            model.boyOperations.push(operation);
+            const radius = Number.isFinite(diameter) ? diameter / 2 : 0;
+            extendBoundsPoint(model.bounds, operation.x - radius, operation.z);
+            extendBoundsPoint(model.bounds, operation.x + radius, operation.z);
+          } else {
+            model.unhandled.push({ command, numbers, body });
+          }
         } else {
           model.unhandled.push({ command, numbers, body });
         }
-      } else {
-        model.unhandled.push({ command, numbers, body });
+        break;
       }
-      break;
-    }
     default: {
       finalizePolygonSegment();
       model.unhandled.push({ command, numbers, body });
