@@ -244,14 +244,14 @@ export function createBoyOperationMesh(operation, context) {
   const rawDirection =
     rawDepth && Math.abs(rawDepth) > 1e-6 ? Math.sign(rawDepth) : wallSide >= 0 ? 1 : -1;
   let direction = rawDirection === 0 ? 1 : rawDirection;
-  const depthHasMagnitude = Number.isFinite(rawDepth) && Math.abs(rawDepth) > 1e-6;
-  if (!depthHasMagnitude && associatedKind === "plate") {
+  if (associatedKind === "plate") {
     if (associatedRole === "top") {
       direction = -1;
     } else if (associatedRole === "bottom") {
       direction = 1;
     }
   }
+  const depthHasMagnitude = Number.isFinite(rawDepth) && Math.abs(rawDepth) > 1e-6;
 
   const metrics = computePlateMetrics(plates);
   const candidatePlate =

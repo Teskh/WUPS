@@ -114,7 +114,12 @@ export function formatTooltipContent(object) {
       if (!member) {
         return null;
       }
-      const kindLabel = capitalize(kind);
+      const role =
+        kind === "plate" && typeof member.role === "string" && member.role.trim() !== ""
+          ? capitalize(member.role.trim())
+          : null;
+      const kindLabel =
+        kind === "plate" && role ? `${role} plate` : capitalize(kind);
       const depth = member.source?.[2];
       return `${kindLabel} — ${formatNumber(member.width)} × ${formatNumber(member.height)} × ${formatNumber(depth)} mm @ (${formatNumber(
         member.x

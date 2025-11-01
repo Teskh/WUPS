@@ -55,8 +55,13 @@ export function parseWup(wupText) {
       return;
     }
 
-    const closed = isClosedLoop(deduped);
-    const normalizedPoints = (closed ? deduped.slice(0, -1) : deduped).map(point => ({ ...point }));
+    let closed = isClosedLoop(deduped);
+    let loopPoints = deduped;
+    if (!closed && deduped.length >= 3) {
+      loopPoints = [...deduped, deduped[0]];
+      closed = true;
+    }
+    const normalizedPoints = (closed ? loopPoints.slice(0, -1) : loopPoints).map(point => ({ ...point }));
     if (closed && normalizedPoints.length >= 3) {
       const segment = {
         kind: "polygon",
@@ -167,7 +172,11 @@ export function parseWup(wupText) {
       case "UG": {
         if (numbers.length >= 5) {
           const offset = extractPlacementOffset(body);
-          const rect = buildRectFromElement(numbers, null, { orientation: "horizontal", offset });
+          const rect = buildRectFromElement(numbers, null, {
+            orientation: "horizontal",
+            offset,
+            role: command === "OG" ? "top" : "bottom"
+          });
           if (rect) {
             model.plates.push(rect);
             extendBounds(model.bounds, rect);
@@ -437,6 +446,7 @@ export function buildRectFromElement(numbers, moduleContext, options = {}) {
     height,
     rotation,
     offset: Number.isFinite(offsetValue) ? offsetValue : null,
+    role: typeof options.role === "string" ? options.role : null,
     source: numbers
   };
 }
