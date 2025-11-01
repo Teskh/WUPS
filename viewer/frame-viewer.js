@@ -50,21 +50,61 @@ export class FrameViewer {
     this.modelGroup = new THREE.Group();
     this.scene.add(this.modelGroup);
 
-    this.groups = {
-      framing: new THREE.Group(),
-      sheathing: new THREE.Group(),
-      nailRows: new THREE.Group(),
-      boyOperations: new THREE.Group(),
-      pafRoutings: new THREE.Group()
+    this.layerVisibility = {
+      structure: true,
+      pli: true,
+      pla: true
     };
 
-    this.modelGroup.add(
-      this.groups.framing,
-      this.groups.sheathing,
-      this.groups.nailRows,
-      this.groups.boyOperations,
-      this.groups.pafRoutings
+    this.layerGroups = {
+      structure: new THREE.Group(),
+      pli: new THREE.Group(),
+      pla: new THREE.Group()
+    };
+    this.layerGroups.structure.name = "StructureLayer";
+    this.layerGroups.pli.name = "PliLayer";
+    this.layerGroups.pla.name = "PlaLayer";
+
+    this.groups = {
+      framing: new THREE.Group(),
+      boyOperations: new THREE.Group(),
+      pliSheathing: new THREE.Group(),
+      plaSheathing: new THREE.Group(),
+      pliNailRows: new THREE.Group(),
+      plaNailRows: new THREE.Group(),
+      pliPafRoutings: new THREE.Group(),
+      plaPafRoutings: new THREE.Group()
+    };
+
+    this.groups.framing.name = "FramingGroup";
+    this.groups.boyOperations.name = "BoyOperationsGroup";
+    this.groups.pliSheathing.name = "PliSheathingGroup";
+    this.groups.plaSheathing.name = "PlaSheathingGroup";
+    this.groups.pliNailRows.name = "PliNailRowsGroup";
+    this.groups.plaNailRows.name = "PlaNailRowsGroup";
+    this.groups.pliPafRoutings.name = "PliPafGroup";
+    this.groups.plaPafRoutings.name = "PlaPafGroup";
+
+    this.layerGroups.structure.add(this.groups.framing, this.groups.boyOperations);
+    this.layerGroups.pli.add(
+      this.groups.pliSheathing,
+      this.groups.pliNailRows,
+      this.groups.pliPafRoutings
     );
+    this.layerGroups.pla.add(
+      this.groups.plaSheathing,
+      this.groups.plaNailRows,
+      this.groups.plaPafRoutings
+    );
+
+    this.modelGroup.add(
+      this.layerGroups.structure,
+      this.layerGroups.pli,
+      this.layerGroups.pla
+    );
+
+    this.applyLayerVisibility();
+    this.onLayerVisibilityChange = null;
 
     this.raycaster = new THREE.Raycaster();
     this.raycaster.params.Line = { threshold: 0.2 };
@@ -127,10 +167,13 @@ export class FrameViewer {
 
     this.clearHoverState();
     clearGroup(this.groups.framing);
-    clearGroup(this.groups.sheathing);
-    clearGroup(this.groups.nailRows);
     clearGroup(this.groups.boyOperations);
-    clearGroup(this.groups.pafRoutings);
+    clearGroup(this.groups.pliSheathing);
+    clearGroup(this.groups.plaSheathing);
+    clearGroup(this.groups.pliNailRows);
+    clearGroup(this.groups.plaNailRows);
+    clearGroup(this.groups.pliPafRoutings);
+    clearGroup(this.groups.plaPafRoutings);
 
     const offsets = { minX, minY, width: wallWidth, height: wallHeight };
     const baseContext = {
@@ -167,16 +210,22 @@ export class FrameViewer {
 
     for (const panel of model.sheathing ?? []) {
       const mesh = createSheathingMesh(panel, baseContext);
-      if (mesh) {
-        this.groups.sheathing.add(mesh);
+      if (!mesh) {
+        continue;
       }
+      const layer = typeof panel?.layer === "string" ? panel.layer : panel?.faceDirection >= 0 ? "pli" : "pla";
+      const target = layer === "pla" ? this.groups.plaSheathing : this.groups.pliSheathing;
+      target.add(mesh);
     }
 
     for (const row of model.nailRows ?? []) {
-      const mesh = createNailRowMesh(row, baseContext);
-      if (mesh) {
-        this.groups.nailRows.add(mesh);
+      const layer = row?.layer === "pla" ? "pla" : "pli";
+      const mesh = createNailRowMesh(row, { ...baseContext, layer });
+      if (!mesh) {
+        continue;
       }
+      const target = layer === "pla" ? this.groups.plaNailRows : this.groups.pliNailRows;
+      target.add(mesh);
     }
 
     for (const operation of model.boyOperations ?? []) {
@@ -187,12 +236,19 @@ export class FrameViewer {
     }
 
     for (const routing of model.pafRoutings ?? []) {
+      const overrideLayer = typeof routing?.layer === "string" ? routing.layer : null;
       const meshes = createPafMeshes(routing, {
         ...baseContext,
-        sheathingSurfaces
+        sheathingSurfaces,
+        layer: overrideLayer ?? undefined
       });
       for (const mesh of meshes) {
-        this.groups.pafRoutings.add(mesh);
+        if (!mesh) {
+          continue;
+        }
+        const meshLayer = mesh.userData?.layer === "pla" ? "pla" : "pli";
+        const target = meshLayer === "pla" ? this.groups.plaPafRoutings : this.groups.pliPafRoutings;
+        target.add(mesh);
       }
     }
 
@@ -483,6 +539,53 @@ export class FrameViewer {
     if (typeof this.onProjectionModeChange === "function") {
       this.onProjectionModeChange(this.projectionMode);
     }
+  }
+
+  notifyLayerVisibilityChange() {
+    if (typeof this.onLayerVisibilityChange === "function") {
+      this.onLayerVisibilityChange(this.getLayerVisibility());
+    }
+  }
+
+  applyLayerVisibility() {
+    if (!this.layerGroups) {
+      return;
+    }
+    for (const [layer, group] of Object.entries(this.layerGroups)) {
+      if (!group) {
+        continue;
+      }
+      const visible = this.layerVisibility?.[layer] !== false;
+      group.visible = visible;
+    }
+    this.requestRender();
+  }
+
+  setLayerVisibility(layer, visible) {
+    if (!this.layerGroups?.[layer]) {
+      return;
+    }
+    const normalized = !!visible;
+    if (this.layerVisibility[layer] === normalized) {
+      return;
+    }
+    this.layerVisibility[layer] = normalized;
+    this.layerGroups[layer].visible = normalized;
+    const hoveredLayer = this.hoveredObject?.userData?.layer ?? null;
+    if (!normalized && hoveredLayer === layer) {
+      this.clearHoverState();
+    } else {
+      this.requestRender();
+    }
+    this.notifyLayerVisibilityChange();
+  }
+
+  getLayerVisibility() {
+    return {
+      structure: this.layerVisibility.structure !== false,
+      pli: this.layerVisibility.pli !== false,
+      pla: this.layerVisibility.pla !== false
+    };
   }
 
   requestRender() {

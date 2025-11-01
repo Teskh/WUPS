@@ -1,4 +1,5 @@
 import { FrameViewer } from "./viewer/frame-viewer.js";
+import { setupLayerControls } from "./viewer/layer-controls.js";
 
 const canvas = document.getElementById("threeCanvas");
 const tooltip = document.getElementById("threeTooltip");
@@ -32,6 +33,9 @@ if (projectionToggle) {
   };
   updateProjectionButton(viewer.getProjectionMode());
 }
+
+const layerControls = document.getElementById("layerControls");
+setupLayerControls({ viewer, container: layerControls });
 
 const initialModel = window.__lastWupModel;
 if (initialModel?.model) {

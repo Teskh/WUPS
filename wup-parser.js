@@ -33,6 +33,7 @@ export function parseWup(wupText) {
   let currentPanel = null;
   let currentRouting = null;
   let currentPolygon = null;
+  let activePanelLayer = null;
 
   function finalizePolygonSegment() {
     if (!currentPolygon) {
@@ -168,6 +169,7 @@ export function parseWup(wupText) {
           face: numbers[1] ?? null,
           passes: numbers[2] ?? null,
           segments: [],
+          layer: activePanelLayer ?? null,
           source: numbers,
           body
         };
@@ -208,6 +210,7 @@ export function parseWup(wupText) {
           const materialToken = extractFirstStringToken(body);
           const rotation = numbers[6] ?? 0;
           const faceDirection = command.startsWith("PLA") ? -1 : 1;
+          const layer = faceDirection >= 0 ? "pli" : "pla";
           const panel = {
             width: numbers[0],
             height: numbers[1],
@@ -218,11 +221,13 @@ export function parseWup(wupText) {
             rotation,
             material: materialToken ?? null,
             faceDirection,
+            layer,
             points: [],
             source: numbers
           };
           model.sheathing.push(panel);
           currentPanel = panel;
+          activePanelLayer = layer;
         }
         break;
       }
@@ -302,20 +307,24 @@ export function parseWup(wupText) {
       }
       case "NR": {
         if (numbers.length >= 4) {
+          const layer = activePanelLayer ?? "pli";
           const row = {
             start: { x: numbers[0], y: numbers[1] },
             end: { x: numbers[2], y: numbers[3] },
             spacing: numbers[4] ?? null,
             gauge: numbers[5] ?? null,
+            layer,
             source: numbers
           };
           model.nailRows.push(row);
           extendBoundsPoint(model.bounds, row.start.x, row.start.y);
           extendBoundsPoint(model.bounds, row.end.x, row.end.y);
+        } else {
+          model.unhandled.push({ command, numbers, body });
+        }
+        break;
       }
-      break;
-    }
-    case "BOY": {
+      case "BOY": {
       if (numbers.length >= 4) {
         const [xRaw, zRaw, diameterRaw, depthRaw] = numbers;
         if (Number.isFinite(xRaw) && Number.isFinite(zRaw)) {

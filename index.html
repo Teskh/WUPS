@@ -16,6 +16,21 @@
         <input type="file" id="wupFile" accept=".wup">
         <button id="loadExample" type="button">Load bundled example</button>
         <button id="toggleProjection" type="button">Switch to perspective view</button>
+        <fieldset class="layer-toggles" id="layerControls">
+          <legend>Layers</legend>
+          <label>
+            <input type="checkbox" data-layer="structure" checked>
+            Structure &amp; BOY
+          </label>
+          <label>
+            <input type="checkbox" data-layer="pli" checked>
+            PLI sheathing, NR, PAF
+          </label>
+          <label>
+            <input type="checkbox" data-layer="pla" checked>
+            PLA sheathing, NR, PAF
+          </label>
+        </fieldset>
         <span id="status" role="status"></span>
       </div>
       <div class="legend">
@@ -27,7 +42,7 @@
           <li><span class="swatch sheathing"></span> Sheathing panels (PLI1/PP)</li>
           <li><span class="swatch nail-row"></span> Nail rows (NR)</li>
         </ul>
-        <p class="legend-hint">Pan with left drag, orbit with right drag, scroll to zoom, press “1” for PLI, “2” for PLA, “3” toggles projection.</p>
+        <p class="legend-hint">Pan with left drag, orbit with right drag, scroll to zoom, press “1” for PLI, “2” for PLA, “3” toggles projection. Use the layer checkboxes to isolate structure, PLI, or PLA content.</p>
       </div>
     </div>
   </div>
