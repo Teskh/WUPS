@@ -206,7 +206,7 @@ export function createBoyOperationMesh(operation, context) {
     wallSide,
     plates
   } = context;
-  if (!materials?.boyOperation || !highlightMaterials?.boyOperation) {
+  if (!materials?.boyOperation || !highlightMaterials?.boyOperation || !materials?.boyArrow) {
     return null;
   }
   if (!operation) {
@@ -249,25 +249,55 @@ export function createBoyOperationMesh(operation, context) {
   const radiusWorld = Math.max(radiusMm * scale, scale * 2);
   const depthWorld = Math.max(depthMagnitude * scale, scale * 2);
 
-  const geometry = new THREE.CylinderGeometry(radiusWorld, radiusWorld, depthWorld, 24);
+  const group = new THREE.Group();
 
-  const mesh = new THREE.Mesh(geometry, materials.boyOperation);
-  mesh.position.set(worldX, worldY, worldZ);
-  mesh.userData.kind = "boy";
-  mesh.userData.operation = operation;
-  mesh.userData.plate = candidatePlate ?? null;
-  mesh.userData.originalMaterial = materials.boyOperation;
-  mesh.userData.setHoverState = state => {
-    mesh.material = state ? highlightMaterials.boyOperation : materials.boyOperation;
+  const cylinderGeometry = new THREE.CylinderGeometry(radiusWorld, radiusWorld, depthWorld, 24);
+  const cylinderMesh = new THREE.Mesh(cylinderGeometry, materials.boyOperation);
+  group.add(cylinderMesh);
+
+  const arrowShaftRadius = radiusWorld * 0.08;
+  const arrowConeRadius = radiusWorld * 0.3;
+  const arrowConeHeight = depthWorld * 0.25;
+  const arrowShaftLength = depthWorld * 0.6;
+
+  const shaftGeometry = new THREE.CylinderGeometry(arrowShaftRadius, arrowShaftRadius, arrowShaftLength, 12);
+  const shaftMesh = new THREE.Mesh(shaftGeometry, materials.boyArrow);
+
+  const coneGeometry = new THREE.ConeGeometry(arrowConeRadius, arrowConeHeight, 12);
+  const coneMesh = new THREE.Mesh(coneGeometry, materials.boyArrow);
+
+  if (direction >= 0) {
+    const shaftEndY = depthWorld / 2 - arrowConeHeight;
+    shaftMesh.position.y = shaftEndY - arrowShaftLength / 2;
+    coneMesh.position.y = depthWorld / 2 - arrowConeHeight / 2;
+  } else {
+    const shaftEndY = -(depthWorld / 2 - arrowConeHeight);
+    shaftMesh.position.y = shaftEndY + arrowShaftLength / 2;
+    coneMesh.position.y = -(depthWorld / 2 - arrowConeHeight / 2);
+    coneMesh.rotation.x = Math.PI;
+  }
+
+  group.add(shaftMesh);
+  group.add(coneMesh);
+
+  group.position.set(worldX, worldY, worldZ);
+  group.userData.kind = "boy";
+  group.userData.operation = operation;
+  group.userData.plate = candidatePlate ?? null;
+  group.userData.originalMaterial = materials.boyOperation;
+  group.userData.setHoverState = state => {
+    cylinderMesh.material = state ? highlightMaterials.boyOperation : materials.boyOperation;
+    shaftMesh.material = state ? highlightMaterials.boyArrow : materials.boyArrow;
+    coneMesh.material = state ? highlightMaterials.boyArrow : materials.boyArrow;
   };
-  mesh.userData.depthInfo = {
+  group.userData.depthInfo = {
     direction,
     depth: depthMagnitude,
     entryY: entryYmm,
     directionLabel: direction >= 0 ? "+Y" : "-Y"
   };
 
-  return mesh;
+  return group;
 }
 
 export function createPafMeshes(routing, context) {

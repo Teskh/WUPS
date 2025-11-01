@@ -28,7 +28,14 @@ export function createMaterialLibrary() {
   const materials = {
     stud: new THREE.MeshStandardMaterial({ color: 0x3a7bd5, metalness: 0.04, roughness: 0.62 }),
     blocking: new THREE.MeshStandardMaterial({ color: 0x16a085, metalness: 0.03, roughness: 0.58 }),
-    plate: new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.08, roughness: 0.55 }),
+    plate: new THREE.MeshStandardMaterial({
+      color: 0xf39c12,
+      metalness: 0.08,
+      roughness: 0.55,
+      transparent: true,
+      opacity: 0.6,
+      depthWrite: false
+    }),
     sheathing: new THREE.MeshStandardMaterial({
       color: 0xc49b66,
       metalness: 0.04,
@@ -44,11 +51,17 @@ export function createMaterialLibrary() {
       side: THREE.DoubleSide
     }),
     boyOperation: new THREE.MeshStandardMaterial({
-      color: 0x2ecc71,
+      color: 0xff6b6b,
       metalness: 0.1,
       roughness: 0.5,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.5
+    }),
+    boyArrow: new THREE.MeshStandardMaterial({
+      color: 0xff0000,
+      metalness: 0.3,
+      roughness: 0.4,
+      transparent: false
     }),
     pafRouting: new THREE.MeshStandardMaterial({
       color: 0x8e44ad,
@@ -66,8 +79,12 @@ export function createMaterialLibrary() {
     sheathing: materials.sheathing.clone(),
     nailRow: materials.nailRow.clone(),
     boyOperation: materials.boyOperation.clone(),
+    boyArrow: materials.boyArrow.clone(),
     pafRouting: materials.pafRouting.clone()
   };
+
+  highlightMaterials.plate.opacity = 0.8;
+  highlightMaterials.plate.depthWrite = false;
 
   Object.values(highlightMaterials).forEach(mat => {
     mat.emissive.setHex(0xffffff);
