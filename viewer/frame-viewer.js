@@ -263,7 +263,17 @@ export class FrameViewer {
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
     const intersects = this.raycaster.intersectObjects(this.modelGroup.children, true);
-    const hit = intersects.find(intersection => intersection.object?.userData?.kind)?.object ?? null;
+    const hit = intersects.find(intersection => {
+      const obj = intersection.object;
+      if (!obj?.userData?.kind) {
+        return false;
+      }
+      const layer = obj.userData.layer;
+      if (layer && this.layerVisibility[layer] === false) {
+        return false;
+      }
+      return true;
+    })?.object ?? null;
 
     this.setHoveredObject(hit);
 
