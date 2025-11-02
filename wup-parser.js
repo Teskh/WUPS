@@ -49,7 +49,8 @@ export function parseWup(wupText) {
       return;
     }
 
-    const deduped = dedupePolygonPoints(currentPolygon.points);
+    const { points: sampledPoints, pathSegments } = buildPolygonPath(currentPolygon.commands);
+    const deduped = dedupePolygonPoints(sampledPoints);
     if (!currentRouting || deduped.length < 2) {
       currentPolygon = null;
       return;
@@ -62,28 +63,35 @@ export function parseWup(wupText) {
       closed = true;
     }
     const normalizedPoints = (closed ? loopPoints.slice(0, -1) : loopPoints).map(point => ({ ...point }));
+    for (const point of sampledPoints) {
+      if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
+        extendBoundsPoint(model.bounds, point.x, point.y);
+      }
+    }
     if (closed && normalizedPoints.length >= 3) {
       const segment = {
         kind: "polygon",
         points: normalizedPoints,
+        pathSegments: pathSegments.map(segment => clonePathSegment(segment)),
         depth: averageOrNull(currentPolygon.depthSamples, Math.abs),
         depthRaw: averageOrNull(currentPolygon.depthRawSamples),
         offset: averageOrNull(currentPolygon.offsetSamples),
         orientation: averageOrNull(currentPolygon.orientationSamples),
         z: averageOrNull(currentPolygon.zSamples),
-        source: currentPolygon.source.map(numbers => [...numbers])
+        source: currentPolygon.source.map(entry => cloneSourceEntry(entry))
       };
       currentRouting.segments.push(segment);
     } else if (normalizedPoints.length >= 2) {
       const segment = {
         kind: "polyline",
         points: normalizedPoints,
+        pathSegments: pathSegments.map(segment => clonePathSegment(segment)),
         depth: averageOrNull(currentPolygon.depthSamples, Math.abs),
         depthRaw: averageOrNull(currentPolygon.depthRawSamples),
         offset: averageOrNull(currentPolygon.offsetSamples),
         orientation: averageOrNull(currentPolygon.orientationSamples),
         z: averageOrNull(currentPolygon.zSamples),
-        source: currentPolygon.source.map(numbers => [...numbers])
+        source: currentPolygon.source.map(entry => cloneSourceEntry(entry))
       };
       currentRouting.segments.push(segment);
     }
@@ -274,20 +282,20 @@ export function parseWup(wupText) {
             break;
           }
 
-          if (!currentPolygon) {
-            currentPolygon = {
-              points: [],
-              depthSamples: [],
-              depthRawSamples: [],
-              offsetSamples: [],
-              orientationSamples: [],
-              zSamples: [],
-              source: []
-            };
-          }
+        if (!currentPolygon) {
+          currentPolygon = {
+            commands: [],
+            depthSamples: [],
+            depthRawSamples: [],
+            offsetSamples: [],
+            orientationSamples: [],
+            zSamples: [],
+            source: []
+          };
+        }
 
-          const zValue = Number.isFinite(numbers[2]) ? numbers[2] : null;
-          const offsetValue = Number.isFinite(numbers[3]) ? numbers[3] : null;
+        const zValue = Number.isFinite(numbers[2]) ? numbers[2] : null;
+        const offsetValue = Number.isFinite(numbers[3]) ? numbers[3] : null;
           const orientationValue = Number.isFinite(numbers[4]) ? numbers[4] : null;
           const trailingValue = Number.isFinite(numbers[5]) ? numbers[5] : null;
           const depthRawValue = derivePafDepthValue(zValue, trailingValue);
@@ -307,8 +315,7 @@ export function parseWup(wupText) {
             source: [...numbers]
           };
 
-          currentPolygon.points.push(point);
-          currentPolygon.source.push([...numbers]);
+          currentPolygon.source.push({ command: "PP", numbers: [...numbers] });
 
           if (Number.isFinite(point.depthRaw)) {
             currentPolygon.depthSamples.push(Math.abs(point.depthRaw));
@@ -324,9 +331,93 @@ export function parseWup(wupText) {
             currentPolygon.zSamples.push(point.z);
           }
           extendBoundsPoint(model.bounds, point.x, point.y);
+
+          if (currentPolygon.commands.length === 0) {
+            currentPolygon.commands.push({ kind: "move", point });
+          } else {
+            currentPolygon.commands.push({ kind: "line", point });
+          }
         } else {
           model.unhandled.push({ command, numbers, body });
         }
+        break;
+      }
+      case "KB": {
+        if (!currentRouting) {
+          model.unhandled.push({ command, numbers, body });
+          break;
+        }
+
+        const tokens = body
+          .split(",")
+          .map(token => token.trim())
+          .filter(token => token.length > 0);
+        const typeToken = tokens[3] ?? null;
+        const x = numbers[0];
+        const y = numbers[1];
+        const radiusValue = numbers[2];
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radiusValue) || !typeToken) {
+          model.unhandled.push({ command, numbers, body });
+          break;
+        }
+
+        if (!currentPolygon) {
+          currentPolygon = {
+            commands: [],
+            depthSamples: [],
+            depthRawSamples: [],
+            offsetSamples: [],
+            orientationSamples: [],
+            zSamples: [],
+            source: []
+          };
+        }
+
+        const depthCandidate = Number.isFinite(numbers[3]) ? numbers[3] : null;
+        const offsetValue = Number.isFinite(numbers[4]) ? numbers[4] : null;
+        const orientationValue = Number.isFinite(numbers[5]) ? numbers[5] : null;
+        const zValue = Number.isFinite(numbers[6]) ? numbers[6] : null;
+        const depthRawValue = derivePafDepthValue(depthCandidate, zValue);
+        const extras = numbers.slice(7);
+
+        const point = {
+          x,
+          y,
+          z: zValue,
+          offset: offsetValue,
+          orientation: orientationValue,
+          depthRaw: depthRawValue,
+          extras,
+          arcType: typeToken,
+          radius: Math.abs(radiusValue),
+          source: [...numbers]
+        };
+
+        if (Number.isFinite(point.depthRaw)) {
+          currentPolygon.depthSamples.push(Math.abs(point.depthRaw));
+          currentPolygon.depthRawSamples.push(point.depthRaw);
+        }
+        if (Number.isFinite(point.offset)) {
+          currentPolygon.offsetSamples.push(point.offset);
+        }
+        if (Number.isFinite(point.orientation)) {
+          currentPolygon.orientationSamples.push(point.orientation);
+        }
+        if (Number.isFinite(point.z)) {
+          currentPolygon.zSamples.push(point.z);
+        }
+        extendBoundsPoint(model.bounds, point.x, point.y);
+
+        const arcCommand = {
+          kind: "arc",
+          point,
+          radius: Math.abs(radiusValue),
+          direction: inferArcDirection(typeToken),
+          largeArc: isLargeArc(typeToken),
+          rawType: typeToken
+        };
+        currentPolygon.commands.push(arcCommand);
+        currentPolygon.source.push({ command: "KB", numbers: [...numbers], type: typeToken });
         break;
       }
       case "NR": {
@@ -565,6 +656,299 @@ function derivePafDepthValue(zValue, trailingValue) {
     return zValue;
   }
   return Math.abs(zValue) <= Math.abs(trailingValue) ? zValue : trailingValue;
+}
+
+function buildPolygonPath(commands) {
+  if (!Array.isArray(commands) || commands.length === 0) {
+    return { points: [], pathSegments: [] };
+  }
+
+  const points = [];
+  const pathSegments = [];
+  let currentPoint = null;
+
+  for (const command of commands) {
+    if (!command || !isFinitePoint(command.point)) {
+      continue;
+    }
+    if (command.kind === "move") {
+      currentPoint = command.point;
+      points.push({ x: command.point.x, y: command.point.y });
+      continue;
+    }
+    if (!currentPoint || !isFinitePoint(currentPoint)) {
+      currentPoint = command.point;
+      points.push({ x: command.point.x, y: command.point.y });
+      continue;
+    }
+    if (command.kind === "line") {
+      pathSegments.push({
+        type: "line",
+        from: { x: currentPoint.x, y: currentPoint.y },
+        to: { x: command.point.x, y: command.point.y }
+      });
+      points.push({ x: command.point.x, y: command.point.y });
+      currentPoint = command.point;
+      continue;
+    }
+    if (command.kind === "arc") {
+      const arcSegment = computeArcSolution(currentPoint, command);
+      if (arcSegment) {
+        pathSegments.push(arcSegment);
+        const arcPoints = sampleArcPoints(arcSegment);
+        for (let i = 1; i < arcPoints.length; i += 1) {
+          points.push(arcPoints[i]);
+        }
+        currentPoint = command.point;
+      } else {
+        pathSegments.push({
+          type: "line",
+          from: { x: currentPoint.x, y: currentPoint.y },
+          to: { x: command.point.x, y: command.point.y },
+          fallback: true
+        });
+        points.push({ x: command.point.x, y: command.point.y });
+        currentPoint = command.point;
+      }
+    }
+  }
+
+  return { points, pathSegments };
+}
+
+function computeArcSolution(startPoint, command) {
+  if (!isFinitePoint(startPoint) || !isFinitePoint(command?.point)) {
+    return null;
+  }
+  const radius = Number.isFinite(command?.radius) ? Math.max(Math.abs(command.radius), 1e-6) : null;
+  if (!Number.isFinite(radius) || radius < 1e-6) {
+    return null;
+  }
+  const direction = command?.direction >= 0 ? 1 : -1;
+  const largeArc = Boolean(command?.largeArc);
+
+  const x0 = startPoint.x;
+  const y0 = startPoint.y;
+  const x1 = command.point.x;
+  const y1 = command.point.y;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const chord = Math.hypot(dx, dy);
+  const epsilon = 1e-6;
+  if (chord < epsilon) {
+    return null;
+  }
+  const halfChord = chord / 2;
+  if (radius < halfChord - epsilon) {
+    return null;
+  }
+
+  const midX = (x0 + x1) / 2;
+  const midY = (y0 + y1) / 2;
+  const chordAngle = Math.atan2(dy, dx);
+  const perpAngle = chordAngle + Math.PI / 2;
+  const height = Math.sqrt(Math.max(radius * radius - halfChord * halfChord, 0));
+  const offsetX = height * Math.cos(perpAngle);
+  const offsetY = height * Math.sin(perpAngle);
+
+  const centers = [
+    { x: midX + offsetX, y: midY + offsetY },
+    { x: midX - offsetX, y: midY - offsetY }
+  ];
+
+  const tolerance = 1e-5;
+  let chosen = null;
+  let chosenSweep = null;
+  for (const center of centers) {
+    const startAngle = Math.atan2(y0 - center.y, x0 - center.x);
+    const endAngle = Math.atan2(y1 - center.y, x1 - center.x);
+    const sweep = computeUnsignedSweep(startAngle, endAngle, direction);
+    if (!Number.isFinite(sweep) || sweep < tolerance) {
+      continue;
+    }
+    const isLarge = sweep > Math.PI + tolerance;
+    if (largeArc && !isLarge && Math.abs(sweep - Math.PI) > tolerance) {
+      continue;
+    }
+    if (!largeArc && isLarge && Math.abs(sweep - Math.PI) > tolerance) {
+      continue;
+    }
+    chosen = { center, startAngle, endAngle };
+    chosenSweep = sweep;
+    break;
+  }
+
+  if (!chosen) {
+    for (const center of centers) {
+      const startAngle = Math.atan2(y0 - center.y, x0 - center.x);
+      const endAngle = Math.atan2(y1 - center.y, x1 - center.x);
+      const sweep = computeUnsignedSweep(startAngle, endAngle, direction);
+      if (Number.isFinite(sweep) && sweep > tolerance) {
+        chosen = { center, startAngle, endAngle };
+        chosenSweep = sweep;
+        break;
+      }
+    }
+  }
+
+  if (!chosen || !Number.isFinite(chosenSweep)) {
+    return null;
+  }
+
+  const signedSweep = computeSignedSweep(chosen.startAngle, chosen.endAngle, direction);
+  return {
+    type: "arc",
+    from: { x: x0, y: y0 },
+    to: { x: x1, y: y1 },
+    center: { x: chosen.center.x, y: chosen.center.y },
+    radius,
+    startAngle: chosen.startAngle,
+    endAngle: chosen.endAngle,
+    clockwise: direction < 0,
+    sweep: Math.abs(signedSweep),
+    signedSweep,
+    largeArc,
+    rawType: command?.rawType ?? null
+  };
+}
+
+function computeUnsignedSweep(startAngle, endAngle, direction) {
+  const twoPi = Math.PI * 2;
+  if (direction >= 0) {
+    let sweep = endAngle - startAngle;
+    while (sweep < 0) {
+      sweep += twoPi;
+    }
+    return sweep;
+  }
+  let sweep = startAngle - endAngle;
+  while (sweep < 0) {
+    sweep += twoPi;
+  }
+  return sweep;
+}
+
+function computeSignedSweep(startAngle, endAngle, direction) {
+  const twoPi = Math.PI * 2;
+  if (direction >= 0) {
+    let sweep = endAngle - startAngle;
+    while (sweep <= 0) {
+      sweep += twoPi;
+    }
+    return sweep;
+  }
+  let sweep = startAngle - endAngle;
+  while (sweep <= 0) {
+    sweep += twoPi;
+  }
+  return -sweep;
+}
+
+function sampleArcPoints(segment) {
+  const signedSweep = Number.isFinite(segment?.signedSweep) ? segment.signedSweep : 0;
+  const radius = Number.isFinite(segment?.radius) ? segment.radius : 0;
+  if (!Number.isFinite(signedSweep) || Math.abs(signedSweep) < 1e-6 || radius <= 0) {
+    return [
+      { x: segment?.from?.x ?? 0, y: segment?.from?.y ?? 0 },
+      { x: segment?.to?.x ?? 0, y: segment?.to?.y ?? 0 }
+    ];
+  }
+  const absSweep = Math.abs(signedSweep);
+  let stepCount = Math.ceil(absSweep / (Math.PI / 24));
+  stepCount = Math.min(Math.max(stepCount, 4), 160);
+  const points = [];
+  const delta = signedSweep / stepCount;
+  for (let i = 0; i <= stepCount; i += 1) {
+    const angle = segment.startAngle + delta * i;
+    const x = segment.center.x + radius * Math.cos(angle);
+    const y = segment.center.y + radius * Math.sin(angle);
+    points.push({ x, y });
+  }
+  if (points.length > 0) {
+    points[0] = { x: segment.from.x, y: segment.from.y };
+    points[points.length - 1] = { x: segment.to.x, y: segment.to.y };
+  }
+  return points;
+}
+
+function clonePathSegment(segment) {
+  if (!segment) {
+    return segment;
+  }
+  if (segment.type === "arc") {
+    return {
+      type: "arc",
+      from: { ...segment.from },
+      to: { ...segment.to },
+      center: { ...segment.center },
+      radius: segment.radius,
+      startAngle: segment.startAngle,
+      endAngle: segment.endAngle,
+      clockwise: Boolean(segment.clockwise),
+      sweep: segment.sweep,
+      signedSweep: segment.signedSweep,
+      largeArc: Boolean(segment.largeArc),
+      rawType: segment.rawType ?? null
+    };
+  }
+  if (segment.type === "line") {
+    return {
+      type: "line",
+      from: { ...segment.from },
+      to: { ...segment.to },
+      fallback: Boolean(segment.fallback)
+    };
+  }
+  return { ...segment };
+}
+
+function cloneSourceEntry(entry) {
+  if (!entry) {
+    return entry;
+  }
+  if (Array.isArray(entry)) {
+    return entry.map(value => value);
+  }
+  if (typeof entry === "object") {
+    const clone = { ...entry };
+    if (Array.isArray(entry.numbers)) {
+      clone.numbers = [...entry.numbers];
+    }
+    return clone;
+  }
+  return entry;
+}
+
+function inferArcDirection(typeToken) {
+  if (typeof typeToken !== "string") {
+    return 1;
+  }
+  const normalized = typeToken.trim().toLowerCase();
+  if (!normalized) {
+    return 1;
+  }
+  if (normalized.includes("cw")) {
+    return -1;
+  }
+  if (normalized.includes("cc")) {
+    return 1;
+  }
+  return normalized.endsWith("w") ? -1 : 1;
+}
+
+function isLargeArc(typeToken) {
+  if (typeof typeToken !== "string") {
+    return false;
+  }
+  const trimmed = typeToken.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return trimmed === trimmed.toUpperCase();
+}
+
+function isFinitePoint(point) {
+  return Number.isFinite(point?.x) && Number.isFinite(point?.y);
 }
 
 function averageOrNull(values, mapFn = v => v) {

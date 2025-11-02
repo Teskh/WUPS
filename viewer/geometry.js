@@ -786,16 +786,48 @@ function createPafPolygonMesh(segment, routing, context) {
     .multiplyScalar(1 / worldPoints.length);
 
   const shape = new THREE.Shape();
-  worldPoints.forEach((pt, index) => {
-    const relativeX = pt.x - centroid.x;
-    const relativeY = pt.y - centroid.y;
-    if (index === 0) {
-      shape.moveTo(relativeX, relativeY);
-    } else {
-      shape.lineTo(relativeX, relativeY);
+  const pathSegments = Array.isArray(segment?.pathSegments) ? segment.pathSegments : null;
+  if (pathSegments && pathSegments.length > 0) {
+    const firstSegment = pathSegments[0];
+    const initialPoint = firstSegment?.from ?? deduped[0];
+    const initialWorld =
+      initialPoint && Number.isFinite(initialPoint.x) && Number.isFinite(initialPoint.y)
+        ? convertPointToWorld(initialPoint, offsets, scale)
+        : worldPoints[0];
+    shape.moveTo(initialWorld.x - centroid.x, initialWorld.y - centroid.y);
+    for (const pathSegment of pathSegments) {
+      if (!pathSegment) {
+        continue;
+      }
+      if (pathSegment.type === "line") {
+        const target = convertPointToWorld(pathSegment.to, offsets, scale);
+        shape.lineTo(target.x - centroid.x, target.y - centroid.y);
+      } else if (pathSegment.type === "arc") {
+        const centerWorld = convertPointToWorld(pathSegment.center, offsets, scale);
+        const radiusWorld = Math.max(pathSegment.radius * scale, scale * 0.5);
+        shape.absarc(
+          centerWorld.x - centroid.x,
+          centerWorld.y - centroid.y,
+          radiusWorld,
+          pathSegment.startAngle,
+          pathSegment.endAngle,
+          Boolean(pathSegment.clockwise)
+        );
+      }
     }
-  });
-  shape.closePath();
+    shape.closePath();
+  } else {
+    worldPoints.forEach((pt, index) => {
+      const relativeX = pt.x - centroid.x;
+      const relativeY = pt.y - centroid.y;
+      if (index === 0) {
+        shape.moveTo(relativeX, relativeY);
+      } else {
+        shape.lineTo(relativeX, relativeY);
+      }
+    });
+    shape.closePath();
+  }
 
   const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
   const depthWorld = Math.max(depthMm * scale, scale * 2);
