@@ -651,12 +651,12 @@ export class FrameViewer {
       // Set controls target to the BOY position
       this.controls.target.copy(worldPos);
 
-      // Position camera very close for detailed view (scale * 200mm away)
+      // Position camera close for detailed view (scale * 400mm away)
       const scale = this.cachedDimensions.scale || 1;
-      const closeDistance = scale * 100; // About 200mm from the BOY
+      const closeDistance = scale * 400; // About 400mm from the BOY
 
       // Position camera at an angle for better 3D view
-      const offset = new THREE.Vector3(closeDistance * 0.5, closeDistance * 0.3, closeDistance);
+      const offset = new THREE.Vector3(closeDistance * 0.4, closeDistance * 0.25, closeDistance);
       this.camera.position.copy(worldPos).add(offset);
 
       this.controls.update();
