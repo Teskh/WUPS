@@ -316,6 +316,7 @@ export function createBoyOperationMesh(operation, context) {
   group.userData.targetRole = associatedRole ?? null;
   group.userData.originalMaterial = materials.boyOperation;
   group.userData.layer = "structure";
+  group.userData.hoverPriority = 10;
   group.userData.setHoverState = state => {
     cylinderMesh.material = state ? highlightMaterials.boyOperation : materials.boyOperation;
     shaftMesh.material = state ? highlightMaterials.boyArrow : materials.boyArrow;

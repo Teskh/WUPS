@@ -263,17 +263,29 @@ export class FrameViewer {
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
     const intersects = this.raycaster.intersectObjects(this.modelGroup.children, true);
-    const hit = intersects.find(intersection => {
-      const obj = intersection.object;
-      if (!obj?.userData?.kind) {
-        return false;
+    let bestHit = null;
+    let bestPriority = Number.NEGATIVE_INFINITY;
+    for (const intersection of intersects) {
+      const target = resolvePickTarget(intersection.object);
+      if (!target?.userData?.kind) {
+        continue;
       }
-      const layer = obj.userData.layer;
+      const layer = target.userData.layer;
       if (layer && this.layerVisibility[layer] === false) {
-        return false;
+        continue;
       }
-      return true;
-    })?.object ?? null;
+      const priority =
+        typeof target.userData.hoverPriority === "number" ? target.userData.hoverPriority : 0;
+      if (
+        priority > bestPriority ||
+        (priority === bestPriority &&
+          (!bestHit || intersection.distance < bestHit.distance))
+      ) {
+        bestHit = { object: target, distance: intersection.distance };
+        bestPriority = priority;
+      }
+    }
+    const hit = bestHit?.object ?? null;
 
     this.setHoveredObject(hit);
 
@@ -696,4 +708,15 @@ export class FrameViewer {
 
     pulse();
   }
+}
+
+function resolvePickTarget(object) {
+  let current = object;
+  while (current) {
+    if (current.userData?.kind) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return null;
 }
