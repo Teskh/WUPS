@@ -244,13 +244,10 @@ export function createBoyOperationMesh(operation, context) {
   const rawDirection =
     rawDepth && Math.abs(rawDepth) > 1e-6 ? Math.sign(rawDepth) : wallSide >= 0 ? 1 : -1;
   let direction = rawDirection === 0 ? 1 : rawDirection;
-  if (associatedKind === "plate") {
-    if (associatedRole === "top") {
-      direction = -1;
-    } else if (associatedRole === "bottom") {
-      direction = 1;
-    }
-  }
+  // Direction is now determined solely by the sign of the depth parameter (rawDepth)
+  // Removed plate-based override to respect BOY specification:
+  // - Negative depth (-t) drills in -Y direction
+  // - Positive depth (+t) drills in +Y direction
   const depthHasMagnitude = Number.isFinite(rawDepth) && Math.abs(rawDepth) > 1e-6;
 
   const metrics = computePlateMetrics(plates);
