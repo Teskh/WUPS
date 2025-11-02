@@ -132,7 +132,8 @@ export function parseWup(wupText) {
             height: numbers[1],
             thickness: numbers[2],
             originX: numbers[3],
-            originY: numbers[4]
+            originY: numbers[4],
+            originZ: numbers[5] ?? 0
           };
           model.modules.push(currentModule);
           setBoyContext(null);
@@ -354,9 +355,18 @@ export function parseWup(wupText) {
             const diameter = Number.isFinite(diameterRaw) ? Math.abs(diameterRaw) : null;
             const depth = Number.isFinite(depthRaw) ? depthRaw : null;
             const context = lastBoyContext ?? null;
+            const resolvedPosition = resolveBoyCoordinates(
+              { x: xRaw, z: zRaw },
+              currentModule,
+              context?.element ?? null
+            );
+            const absoluteX = Number.isFinite(resolvedPosition?.x) ? resolvedPosition.x : xRaw;
+            const absoluteZ = Number.isFinite(resolvedPosition?.z) ? resolvedPosition.z : zRaw;
             const operation = {
-              x: xRaw,
-              z: zRaw,
+              x: absoluteX,
+              z: absoluteZ,
+              localX: xRaw,
+              localZ: zRaw,
               diameter,
               depth,
               targetElement: context?.element ?? null,
@@ -442,10 +452,13 @@ export function buildRectFromElement(numbers, moduleContext, options = {}) {
   return {
     x: originX + x,
     y: originY + y,
+    localX: x,
+    localY: y,
     width,
     height,
     rotation,
     offset: Number.isFinite(offsetValue) ? offsetValue : null,
+    orientation: orientation || null,
     role: typeof options.role === "string" ? options.role : null,
     source: numbers
   };
@@ -562,6 +575,31 @@ function averageOrNull(values, mapFn = v => v) {
   return sum / values.length;
 }
 
+function resolveBoyCoordinates(local, moduleContext, targetElement) {
+  if (!local || (local.x == null && local.z == null)) {
+    return { x: null, z: null };
+  }
+
+  const moduleOriginX = Number.isFinite(moduleContext?.originX) ? moduleContext.originX : null;
+  const moduleOriginZ = Number.isFinite(moduleContext?.originZ) ? moduleContext.originZ : null;
+
+  let baseX = Number.isFinite(targetElement?.x) ? targetElement.x : null;
+  if (baseX === null && Number.isFinite(targetElement?.localX) && Number.isFinite(moduleOriginX)) {
+    baseX = moduleOriginX + targetElement.localX;
+  }
+  if (baseX === null && moduleOriginX !== null) {
+    baseX = moduleOriginX;
+  }
+
+  const resolvedX =
+    Number.isFinite(local.x) && baseX !== null ? baseX + local.x : Number.isFinite(local.x) ? local.x : null;
+  const resolvedZ = Number.isFinite(local.z)
+    ? (moduleOriginZ !== null ? moduleOriginZ : 0) + local.z
+    : null;
+
+  return { x: resolvedX, z: resolvedZ };
+}
+
 if (typeof window !== "undefined") {
   window.parseWup = parseWup;
 }
@@ -571,7 +609,8 @@ export const _internal = {
   extractNumbers,
   extractPlacementOffset,
   extendBounds,
-  extendBoundsPoint
+  extendBoundsPoint,
+  resolveBoyCoordinates
 };
 
 if (typeof module !== "undefined" && module.exports) {
