@@ -3,8 +3,9 @@
  *
  * Validates BOY operations against quality standards:
  * 1. Direction: BOY must face inward toward the element
- * 2. Edge Distance: BOY outer edge must be at least 10mm from outer side of stud/joist
- * 3. Diameter: BOY diameter must be 30mm
+ * 2. Wall Thickness Edge Distance: BOY outer edge must be at least 10mm from outer/inner faces of wall (Z-axis)
+ * 3. Stud Distance: BOY outer edge must be at least 10mm from nearest stud (QS) edge
+ * 4. Diameter: BOY diameter must be 30mm
  */
 
 export function runBoyDiagnostics(model) {
@@ -40,8 +41,13 @@ export function runBoyDiagnostics(model) {
         results: []
       },
       {
-        name: "Edge Distance Check",
-        description: "BOY outer edge is at least 10mm from outer side of stud/joist",
+        name: "Wall Thickness Edge Distance Check",
+        description: "BOY outer edge is at least 10mm from outer/inner faces of wall (Z-axis through-thickness)",
+        results: []
+      },
+      {
+        name: "Stud Distance Check",
+        description: "BOY outer edge is at least 10mm from nearest stud (QS) edge",
         results: []
       },
       {
@@ -70,7 +76,7 @@ export function runBoyDiagnostics(model) {
       details: directionResult.details
     });
 
-    // Check 2: Edge Distance (>= 10mm from outer edge)
+    // Check 2: Wall Thickness Edge Distance (>= 10mm from outer/inner face)
     const edgeResult = checkEdgeDistance(boy, associatedElement, wallThickness, wallSide);
     results.checks[1].results.push({
       id: boyId,
@@ -81,9 +87,20 @@ export function runBoyDiagnostics(model) {
       details: edgeResult.details
     });
 
-    // Check 3: Diameter (should be 30mm)
-    const diameterResult = checkDiameter(boy);
+    // Check 3: Stud Distance (>= 10mm from nearest stud edge)
+    const studResult = checkStudDistance(boy, studs);
     results.checks[2].results.push({
+      id: boyId,
+      boy,
+      element: associatedElement,
+      passed: studResult.passed,
+      message: studResult.message,
+      details: studResult.details
+    });
+
+    // Check 4: Diameter (should be 30mm)
+    const diameterResult = checkDiameter(boy);
+    results.checks[3].results.push({
       id: boyId,
       boy,
       element: associatedElement,
@@ -93,7 +110,7 @@ export function runBoyDiagnostics(model) {
     });
 
     // Update summary
-    const allChecksPassed = directionResult.passed && edgeResult.passed && diameterResult.passed;
+    const allChecksPassed = directionResult.passed && edgeResult.passed && studResult.passed && diameterResult.passed;
     if (allChecksPassed) {
       results.summary.passed++;
     } else {
@@ -235,7 +252,7 @@ function inferPlateRole(element, wallHeight) {
 }
 
 /**
- * Check 2: BOY outer edge is at least 10mm from outer side of stud/joist
+ * Check 2: BOY outer edge is at least 10mm from outer/inner faces of wall (Z-axis)
  */
 function checkEdgeDistance(boy, element, wallThickness, wallSide) {
   const MIN_EDGE_DISTANCE = 10; // mm
@@ -281,7 +298,92 @@ function checkEdgeDistance(boy, element, wallThickness, wallSide) {
 }
 
 /**
- * Check 3: BOY diameter is 30mm
+ * Check 3: BOY outer edge is at least 10mm from nearest stud edge
+ */
+function checkStudDistance(boy, studs) {
+  const MIN_STUD_DISTANCE = 10; // mm
+
+  if (!studs || studs.length === 0) {
+    return {
+      passed: true,
+      message: `No studs in model to check`,
+      details: {}
+    };
+  }
+
+  const diameter = Number.isFinite(boy.diameter) ? Math.abs(boy.diameter) : 20;
+  const radius = diameter / 2;
+
+  // Find studs that could interfere with the BOY
+  // BOY is positioned at (x, z) where z is through the wall
+  // Studs extend vertically (Y-axis), so we need to check X-axis proximity
+
+  let nearestStud = null;
+  let minDistance = Number.POSITIVE_INFINITY;
+
+  for (const stud of studs) {
+    if (!Number.isFinite(stud.x) || !Number.isFinite(stud.width)) {
+      continue;
+    }
+
+    // Calculate the horizontal distance from BOY center to stud edges
+    const studLeftEdge = stud.x;
+    const studRightEdge = stud.x + stud.width;
+
+    let distanceToStud;
+
+    if (boy.x < studLeftEdge) {
+      // BOY is to the left of the stud
+      distanceToStud = studLeftEdge - boy.x;
+    } else if (boy.x > studRightEdge) {
+      // BOY is to the right of the stud
+      distanceToStud = boy.x - studRightEdge;
+    } else {
+      // BOY center is inside the stud's X range
+      // Find the closest edge
+      const distToLeft = boy.x - studLeftEdge;
+      const distToRight = studRightEdge - boy.x;
+      distanceToStud = Math.min(distToLeft, distToRight);
+    }
+
+    if (distanceToStud < minDistance) {
+      minDistance = distanceToStud;
+      nearestStud = stud;
+    }
+  }
+
+  if (!nearestStud) {
+    return {
+      passed: true,
+      message: `No studs found near BOY`,
+      details: {}
+    };
+  }
+
+  // Calculate the actual clearance (distance from BOY outer edge to stud edge)
+  const clearance = minDistance - radius;
+  const passed = clearance >= MIN_STUD_DISTANCE;
+
+  return {
+    passed,
+    message: passed
+      ? `Stud distance OK (${clearance.toFixed(1)}mm clearance from nearest stud)`
+      : `Too close to stud (${clearance.toFixed(1)}mm clearance, minimum ${MIN_STUD_DISTANCE}mm required)`,
+    details: {
+      diameter: diameter.toFixed(1),
+      radius: radius.toFixed(1),
+      boyX: boy.x.toFixed(1),
+      nearestStudX: nearestStud.x.toFixed(1),
+      nearestStudWidth: nearestStud.width.toFixed(1),
+      distanceToStud: minDistance.toFixed(1),
+      clearance: clearance.toFixed(1),
+      required: MIN_STUD_DISTANCE
+    }
+  };
+}
+
+/**
+ * Check 4: BOY diameter is 30mm
  */
 function checkDiameter(boy) {
   const EXPECTED_DIAMETER = 30; // mm

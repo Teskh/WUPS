@@ -23,7 +23,7 @@ if (typeof document !== "undefined") {
 
   if (loadExampleBtn) {
     loadExampleBtn.addEventListener("click", () => {
-      fetch("example.wup")
+      fetch("example4.wup")
         .then(resp => {
           if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}`);

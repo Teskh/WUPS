@@ -6,11 +6,12 @@ This folder contains diagnostic scripts for validating WUP models against qualit
 
 ### BOY Diagnostics (`boy-diagnostics.js`)
 
-Validates BOY (Blind Operation Y-axis) drilling operations with three checks:
+Validates BOY (Blind Operation Y-axis) drilling operations with four checks:
 
 1. **Direction Check**: Ensures BOY operations face inward toward the element (plate/stud/joist)
-2. **Edge Distance Check**: Verifies that the BOY outer edge is at least 10mm from the outer side of the element
-3. **Diameter Check**: Confirms that the BOY diameter is 30mm (within tolerance)
+2. **Wall Thickness Edge Distance Check**: Verifies that the BOY outer edge is at least 10mm from the outer/inner faces of the wall (Z-axis through-thickness)
+3. **Stud Distance Check**: Verifies that the BOY outer edge is at least 10mm from the nearest stud (QS) edge
+4. **Diameter Check**: Confirms that the BOY diameter is 30mm (within tolerance)
 
 ## Usage
 
@@ -144,13 +145,26 @@ BOY operations should face inward toward the element they're associated with:
 
 The direction is determined by the sign of the `depth` parameter in the BOY command.
 
-### Edge Distance Check
+### Wall Thickness Edge Distance Check
 
-The outer edge of the BOY operation (considering its radius) must be at least 10mm away from the outer side of the wall. This is calculated using the `z` position (through-wall position) and the diameter:
+The outer edge of the BOY operation (considering its radius) must be at least 10mm away from the outer and inner faces of the wall through the Z-axis (wall thickness). This is calculated using the `z` position (through-wall position) and the diameter:
 
 - Distance from outer side = `z - radius`
 - Distance from inner side = `wallThickness - z - radius`
 - Both must be ≥ 10mm
+
+This check ensures the BOY doesn't break through the wall faces.
+
+### Stud Distance Check
+
+The outer edge of the BOY operation must be at least 10mm away from the nearest stud (QS) edge. This is calculated along the X-axis:
+
+- For each stud, calculate horizontal distance from BOY center to stud edges
+- Find the minimum distance to any stud
+- Subtract the BOY radius to get clearance: `clearance = distance - radius`
+- Clearance must be ≥ 10mm
+
+This check ensures the BOY doesn't weaken studs by drilling too close to their edges.
 
 ### Diameter Check
 
