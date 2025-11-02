@@ -55,11 +55,12 @@ export function runBoyDiagnostics(model) {
   boyOperations.forEach((boy, index) => {
     const boyId = `BOY #${index + 1} (x=${boy.x.toFixed(1)}, z=${boy.z.toFixed(1)})`;
 
-    // Find associated framing element
-    const associatedElement = findAssociatedElement(boy, framingElements, wallThickness, wallSide, wallHeight);
+    // Use targetElement if available (from parser), otherwise find it
+    const associatedElement = boy.targetElement || findAssociatedElement(boy, framingElements, wallThickness, wallSide, wallHeight);
+    const targetRole = boy.targetRole || (associatedElement ? inferPlateRole(associatedElement, wallHeight) : null);
 
     // Check 1: Direction (faces inward)
-    const directionResult = checkDirection(boy, associatedElement, wallThickness, wallSide, wallHeight);
+    const directionResult = checkDirection(boy, associatedElement, targetRole, wallThickness, wallSide, wallHeight);
     results.checks[0].results.push({
       id: boyId,
       boy,
@@ -184,11 +185,11 @@ function determineDirection(boy, wallThickness, wallSide) {
 /**
  * Check 1: BOY faces inward toward the element
  */
-function checkDirection(boy, element, wallThickness, wallSide, wallHeight) {
+function checkDirection(boy, element, targetRole, wallThickness, wallSide, wallHeight) {
   const direction = determineDirection(boy, wallThickness, wallSide);
-  const directionLabel = direction >= 0 ? "+Y" : "-Y";
+  const directionLabel = direction >= 0 ? "+Y (upward)" : "-Y (downward)";
 
-  if (!element) {
+  if (!element || !targetRole) {
     return {
       passed: false,
       message: `No associated element found`,
@@ -199,37 +200,38 @@ function checkDirection(boy, element, wallThickness, wallSide, wallHeight) {
     };
   }
 
-  // BOY drilling logic (from geometry.js):
-  // - Negative depth (-Y): drills downward from TOP plate
-  // - Positive depth (+Y): drills upward from BOTTOM plate
-  // Bottom plates are at lower Y values (near 0), top plates at higher Y values (near wallHeight)
-  const elementCenterY = element.y + element.height / 2;
-  const wallCenterY = wallHeight / 2;
-
-  // Determine if this element is actually a top or bottom plate
-  const isTopPlate = elementCenterY > wallCenterY;
-
-  // Determine which type of plate this direction should be used with
-  const shouldBeOnTopPlate = direction < 0; // negative = top, positive = bottom
-
-  // Check if the BOY is associated with the correct plate type
-  const passed = isTopPlate === shouldBeOnTopPlate;
+  // BOY drilling logic:
+  // - Negative depth (-Y): drills downward, correct for TOP plate
+  // - Positive depth (+Y): drills upward, correct for BOTTOM plate
+  const isTopPlate = targetRole === 'top';
+  const expectedDirection = isTopPlate ? -1 : 1;
+  const passed = direction === expectedDirection;
 
   return {
     passed,
     message: passed
-      ? `Correct (${directionLabel} direction on ${isTopPlate ? 'top' : 'bottom'} plate)`
-      : `Incorrect (${directionLabel} direction on ${isTopPlate ? 'top' : 'bottom'} plate, expected on ${shouldBeOnTopPlate ? 'top' : 'bottom'} plate)`,
+      ? `Correct (${directionLabel} on ${targetRole} plate)`
+      : `Incorrect (${directionLabel} on ${targetRole} plate, expected ${expectedDirection >= 0 ? '+Y (upward)' : '-Y (downward)'})`,
     details: {
       direction: directionLabel,
-      elementY: elementCenterY.toFixed(1),
-      wallHeight: wallHeight.toFixed(1),
-      wallCenterY: wallCenterY.toFixed(1),
-      isTopPlate,
-      shouldBeOnTopPlate,
-      depth: boy.depth
+      targetRole,
+      expectedDirection: expectedDirection >= 0 ? '+Y (upward)' : '-Y (downward)',
+      depth: boy.depth,
+      plateY: element.y.toFixed(1)
     }
   };
+}
+
+/**
+ * Infer plate role based on Y position
+ */
+function inferPlateRole(element, wallHeight) {
+  if (!element || !Number.isFinite(element.y)) {
+    return null;
+  }
+  const elementCenterY = element.y + (element.height || 0) / 2;
+  const wallCenterY = wallHeight / 2;
+  return elementCenterY > wallCenterY ? 'top' : 'bottom';
 }
 
 /**

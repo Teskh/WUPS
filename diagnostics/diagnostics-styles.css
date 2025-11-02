@@ -350,6 +350,22 @@
   color: #666;
 }
 
+.zoom-to-error {
+  padding: 4px 8px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-left: 8px;
+  transition: background 0.2s;
+}
+
+.zoom-to-error:hover {
+  background: #0056b3;
+}
+
 .result-details {
   padding: 12px;
   background: #f9f9f9;

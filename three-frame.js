@@ -45,3 +45,8 @@ if (initialModel?.model) {
 document.addEventListener("wup:model", event => {
   viewer.updateModel(event.detail.model);
 });
+
+document.addEventListener("diagnostics:zoomToBoy", event => {
+  const { x, z } = event.detail;
+  viewer.zoomToBoy(x, z);
+});

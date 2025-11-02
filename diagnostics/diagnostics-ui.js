@@ -336,11 +336,16 @@ function createCheckSection(check) {
     const checkbox = result.passed ? "✓" : "✗";
     const statusClass = result.passed ? "check-pass" : "check-fail";
 
+    // Add zoom button for failed items with BOY operations
+    const zoomButton = !result.passed && result.boy ?
+      `<button class="zoom-to-error" data-boy-x="${result.boy.x}" data-boy-z="${result.boy.z}" title="Zoom to this BOY">🔍</button>` : '';
+
     item.innerHTML = `
       <div class="result-summary">
         <span class="${statusClass}">${checkbox}</span>
         <strong>${result.id}</strong>
         <span class="result-message">${result.message}</span>
+        ${zoomButton}
       </div>
     `;
 
@@ -362,9 +367,22 @@ function createCheckSection(check) {
       detailsDiv.appendChild(detailsList);
       item.appendChild(detailsDiv);
 
-      // Toggle details on click
-      item.querySelector(".result-summary").addEventListener("click", () => {
-        detailsDiv.classList.toggle("collapsed");
+      // Toggle details on click (but not on zoom button)
+      item.querySelector(".result-summary").addEventListener("click", (e) => {
+        if (!e.target.classList.contains("zoom-to-error")) {
+          detailsDiv.classList.toggle("collapsed");
+        }
+      });
+    }
+
+    // Add zoom button handler
+    const zoomBtn = item.querySelector(".zoom-to-error");
+    if (zoomBtn) {
+      zoomBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const boyX = parseFloat(zoomBtn.dataset.boyX);
+        const boyZ = parseFloat(zoomBtn.dataset.boyZ);
+        zoomToBoy(boyX, boyZ);
       });
     }
 
@@ -384,6 +402,20 @@ function createCheckSection(check) {
   });
 
   return checkDiv;
+}
+
+/**
+ * Zoom the 3D viewer to a specific BOY operation
+ */
+function zoomToBoy(boyX, boyZ) {
+  // Dispatch event for the 3D viewer to handle
+  if (typeof document !== "undefined") {
+    document.dispatchEvent(
+      new CustomEvent("diagnostics:zoomToBoy", {
+        detail: { x: boyX, z: boyZ }
+      })
+    );
+  }
 }
 
 // Auto-initialize when loaded

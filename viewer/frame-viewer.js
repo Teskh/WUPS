@@ -610,4 +610,90 @@ export class FrameViewer {
       this.needsRender = false;
     }
   }
+
+  zoomToBoy(boyX, boyZ) {
+    // Find the BOY mesh in the scene (BOY meshes are in this.groups.boyOperations)
+    let targetMesh = null;
+    const tolerance = 1; // mm tolerance for position matching
+
+    if (!this.groups?.boyOperations) {
+      console.warn('BOY operations group not found');
+      return;
+    }
+
+    for (const child of this.groups.boyOperations.children) {
+      if (child.userData?.kind === "boy" && child.userData?.operation) {
+        const op = child.userData.operation;
+        if (Math.abs(op.x - boyX) < tolerance && Math.abs(op.z - boyZ) < tolerance) {
+          targetMesh = child;
+          break;
+        }
+      }
+    }
+
+    if (!targetMesh) {
+      console.warn(`BOY at x=${boyX}, z=${boyZ} not found in scene`);
+      console.warn('Available BOYs:', this.groups.boyOperations.children.map(c => c.userData?.operation));
+      return;
+    }
+
+    // Get the world position of the BOY
+    const worldPos = new THREE.Vector3();
+    targetMesh.getWorldPosition(worldPos);
+
+    // Switch to perspective for better depth perception
+    if (this.projectionMode !== "perspective") {
+      this.setProjectionMode("perspective");
+    }
+
+    // Move camera to focus on this BOY with close zoom
+    if (this.controls && this.camera) {
+      // Set controls target to the BOY position
+      this.controls.target.copy(worldPos);
+
+      // Position camera very close for detailed view (scale * 200mm away)
+      const scale = this.cachedDimensions.scale || 1;
+      const closeDistance = scale * 100; // About 200mm from the BOY
+
+      // Position camera at an angle for better 3D view
+      const offset = new THREE.Vector3(closeDistance * 0.5, closeDistance * 0.3, closeDistance);
+      this.camera.position.copy(worldPos).add(offset);
+
+      this.controls.update();
+      this.requestRender();
+    }
+
+    // Highlight the BOY with pulsing effect
+    this.highlightBoy(targetMesh);
+  }
+
+  highlightBoy(boyMesh) {
+    // Create a pulsing highlight effect
+    let pulseCount = 0;
+    const maxPulses = 6;
+    const pulseInterval = 300; // ms
+
+    const pulse = () => {
+      if (pulseCount >= maxPulses) {
+        // Reset to normal after pulsing
+        if (boyMesh.userData.setHoverState) {
+          boyMesh.userData.setHoverState(false);
+          this.requestRender();
+        }
+        return;
+      }
+
+      // Toggle highlight state
+      const shouldHighlight = pulseCount % 2 === 0;
+      if (boyMesh.userData.setHoverState) {
+        boyMesh.userData.setHoverState(shouldHighlight);
+        this.requestRender();
+      }
+
+      pulseCount++;
+      setTimeout(pulse, pulseInterval);
+    };
+
+    pulse();
+  }
 }
