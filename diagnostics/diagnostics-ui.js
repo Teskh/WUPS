@@ -383,6 +383,7 @@ function createCheckSection(check) {
         const boyX = parseFloat(zoomBtn.dataset.boyX);
         const boyZ = parseFloat(zoomBtn.dataset.boyZ);
         zoomToBoy(boyX, boyZ);
+        hideDiagnostics();
       });
     }
 
