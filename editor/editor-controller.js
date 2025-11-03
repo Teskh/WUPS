@@ -85,11 +85,13 @@ function buildStatement(command, values) {
 }
 
 function buildNailRowStatement(row) {
-  return buildStatement(row.__command ?? "NR", row.source ?? []);
+  const stmt = buildStatement(row.__command ?? "NR", row.source ?? []);
+  return stmt.endsWith(";") ? stmt : `${stmt};`;
 }
 
 function buildBoyStatement(operation) {
-  return buildStatement(operation.__command ?? "BOY", operation.source ?? []);
+  const stmt = buildStatement(operation.__command ?? "BOY", operation.source ?? []);
+  return stmt.endsWith(";") ? stmt : `${stmt};`;
 }
 
 function buildPafStatement(routing) {
@@ -135,7 +137,9 @@ function buildPafStatement(routing) {
     }
   }
 
-  return lines.join("\n");
+  // Add semicolons to each line
+  const linesWithSemicolons = lines.map(line => line.endsWith(";") ? line : `${line};`);
+  return linesWithSemicolons.join("\n");
 }
 
 function ensureStatementArray(model) {
@@ -370,6 +374,7 @@ export class EditorController {
     if (typeof this.overlays.clearCommandLayers === "function") {
       this.overlays.clearCommandLayers();
     }
+    this.selection.clear();
   }
 
   startTranslateCommand() {
@@ -618,6 +623,13 @@ export class EditorController {
     }
 
     if (pointsModified) {
+      // Clear all old statement indices for this PAF (PP/KB/MP lines)
+      if (Array.isArray(routing.__statementIndices)) {
+        for (let i = 1; i < routing.__statementIndices.length; i++) {
+          this.setStatementText(routing.__statementIndices[i], null);
+        }
+      }
+      // Set the rebuilt multi-line PAF statement at the first index
       this.setStatementText(routing.__statementIndex, buildPafStatement(routing));
     }
 

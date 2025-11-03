@@ -227,6 +227,7 @@ export function parseWup(wupText) {
           source: numbers,
           body,
           __statementIndex: statementIndex,
+          __statementIndices: [statementIndex],
           __command: command,
           __body: body
         };
@@ -253,6 +254,9 @@ export function parseWup(wupText) {
             source: numbers
           };
           currentRouting.segments.push(segment);
+          if (Array.isArray(currentRouting.__statementIndices)) {
+            currentRouting.__statementIndices.push(statementIndex);
+          }
           const radius = Number.isFinite(segment.radius) ? segment.radius : 0;
           extendBoundsPoint(model.bounds, position.x - radius, position.y - radius);
           extendBoundsPoint(model.bounds, position.x + radius, position.y + radius);
@@ -341,6 +345,9 @@ export function parseWup(wupText) {
           };
 
           currentPolygon.source.push({ command: "PP", numbers: [...numbers] });
+          if (currentRouting && Array.isArray(currentRouting.__statementIndices)) {
+            currentRouting.__statementIndices.push(statementIndex);
+          }
 
           if (Number.isFinite(point.depthRaw)) {
             currentPolygon.depthSamples.push(Math.abs(point.depthRaw));
@@ -443,6 +450,9 @@ export function parseWup(wupText) {
         };
         currentPolygon.commands.push(arcCommand);
         currentPolygon.source.push({ command: "KB", numbers: [...numbers], type: typeToken });
+        if (currentRouting && Array.isArray(currentRouting.__statementIndices)) {
+          currentRouting.__statementIndices.push(statementIndex);
+        }
         break;
       }
       case "NR": {

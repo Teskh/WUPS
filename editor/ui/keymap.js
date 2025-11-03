@@ -59,6 +59,12 @@ export class Keymap {
           this.controller.startDeleteCommand();
         }
         break;
+      case "Escape":
+        if (this.selection.getSelection().length > 0) {
+          event.preventDefault();
+          this.selection.clear();
+        }
+        break;
       case "s":
       case "S":
         if (event.metaKey || event.ctrlKey) {
