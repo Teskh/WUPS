@@ -92,6 +92,52 @@ function buildBoyStatement(operation) {
   return buildStatement(operation.__command ?? "BOY", operation.source ?? []);
 }
 
+function buildPafStatement(routing) {
+  const command = routing.__command ?? "PAF";
+  const lines = [];
+
+  // Build PAF header line with parameters
+  if (Array.isArray(routing.source) && routing.source.length > 0) {
+    lines.push(buildStatement(command, routing.source));
+  } else {
+    lines.push(command);
+  }
+
+  // Build polygon point lines (PP, KB, MP) from each segment
+  if (Array.isArray(routing.segments)) {
+    for (const segment of routing.segments) {
+      if (!segment) {
+        continue;
+      }
+
+      // Handle MP (circle) segments - source is a direct numbers array
+      if (segment.position && Array.isArray(segment.source)) {
+        lines.push(buildStatement("MP", segment.source));
+      }
+      // Handle PP/KB (polygon/polyline) segments - source is array of {command, numbers, type}
+      else if (Array.isArray(segment.source)) {
+        for (const sourceEntry of segment.source) {
+          if (sourceEntry && sourceEntry.command && Array.isArray(sourceEntry.numbers)) {
+            let line = buildStatement(sourceEntry.command, sourceEntry.numbers);
+            // For KB commands, we need to preserve the arc type token
+            if (sourceEntry.command === "KB" && sourceEntry.type) {
+              // Replace the 4th parameter with the original type token
+              const parts = sourceEntry.numbers.map(formatNumber);
+              if (parts.length >= 4) {
+                parts[3] = sourceEntry.type;
+              }
+              line = `${sourceEntry.command} ${parts.join(",")}`;
+            }
+            lines.push(line);
+          }
+        }
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function ensureStatementArray(model) {
   ensureModelMetadata(model);
   return model.__statements;
@@ -414,6 +460,11 @@ export class EditorController {
         if (updated) {
           count += 1;
         }
+      } else if (resolved.kind === "paf") {
+        const updated = this.translatePafRouting(resolved.item, axis, mm);
+        if (updated) {
+          count += 1;
+        }
       }
     }
     return count;
@@ -471,6 +522,106 @@ export class EditorController {
     }
     this.setStatementText(operation.__statementIndex, buildBoyStatement(operation));
     return true;
+  }
+
+  translatePafRouting(routing, axis, mm) {
+    if (!routing || typeof routing !== "object") {
+      return false;
+    }
+    if (!Array.isArray(routing.segments) || routing.segments.length === 0) {
+      return false;
+    }
+    if (axis !== "x" && axis !== "y") {
+      return false;
+    }
+
+    let pointsModified = false;
+    const axisIndex = axis === "x" ? 0 : 1;
+
+    for (const segment of routing.segments) {
+      if (!segment || typeof segment !== "object") {
+        continue;
+      }
+
+      // Handle circle segments (MP) - have position instead of points
+      if (segment.position && typeof segment.position === "object") {
+        if (axis === "x" && Number.isFinite(segment.position.x)) {
+          segment.position.x += mm;
+          if (Array.isArray(segment.source) && segment.source.length > 0) {
+            segment.source[0] = Number.isFinite(segment.source[0]) ? segment.source[0] + mm : segment.position.x;
+          }
+          pointsModified = true;
+        } else if (axis === "y" && Number.isFinite(segment.position.y)) {
+          segment.position.y += mm;
+          if (Array.isArray(segment.source) && segment.source.length > 1) {
+            segment.source[1] = Number.isFinite(segment.source[1]) ? segment.source[1] + mm : segment.position.y;
+          }
+          pointsModified = true;
+        }
+      }
+
+      // Handle polygon/polyline segments (PP/KB) - have points array
+      if (Array.isArray(segment.points)) {
+        for (const point of segment.points) {
+          if (point && typeof point === "object") {
+            if (axis === "x" && Number.isFinite(point.x)) {
+              point.x += mm;
+              pointsModified = true;
+            } else if (axis === "y" && Number.isFinite(point.y)) {
+              point.y += mm;
+              pointsModified = true;
+            }
+          }
+        }
+
+        // Update pathSegments (used for rendering)
+        if (Array.isArray(segment.pathSegments)) {
+          for (const pathSeg of segment.pathSegments) {
+            if (!pathSeg || typeof pathSeg !== "object") {
+              continue;
+            }
+            if (pathSeg.from && typeof pathSeg.from === "object") {
+              if (axis === "x" && Number.isFinite(pathSeg.from.x)) {
+                pathSeg.from.x += mm;
+              } else if (axis === "y" && Number.isFinite(pathSeg.from.y)) {
+                pathSeg.from.y += mm;
+              }
+            }
+            if (pathSeg.to && typeof pathSeg.to === "object") {
+              if (axis === "x" && Number.isFinite(pathSeg.to.x)) {
+                pathSeg.to.x += mm;
+              } else if (axis === "y" && Number.isFinite(pathSeg.to.y)) {
+                pathSeg.to.y += mm;
+              }
+            }
+            if (pathSeg.center && typeof pathSeg.center === "object") {
+              if (axis === "x" && Number.isFinite(pathSeg.center.x)) {
+                pathSeg.center.x += mm;
+              } else if (axis === "y" && Number.isFinite(pathSeg.center.y)) {
+                pathSeg.center.y += mm;
+              }
+            }
+          }
+        }
+
+        // Update source records (PP/KB statements) - only for polygon/polyline segments
+        if (Array.isArray(segment.source)) {
+          for (const sourceEntry of segment.source) {
+            if (sourceEntry && Array.isArray(sourceEntry.numbers) && sourceEntry.numbers.length > axisIndex) {
+              if (Number.isFinite(sourceEntry.numbers[axisIndex])) {
+                sourceEntry.numbers[axisIndex] += mm;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (pointsModified) {
+      this.setStatementText(routing.__statementIndex, buildPafStatement(routing));
+    }
+
+    return pointsModified;
   }
 
   startDeleteCommand() {

@@ -852,6 +852,7 @@ function createPafPolygonMesh(segment, routing, context) {
   mesh.userData.kind = "paf";
   mesh.userData.routing = routing;
   mesh.userData.segment = segment;
+  mesh.userData.editorId = routing?.__editorId ?? null;
   mesh.userData.originalMaterial = materials.pafRouting;
   const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
   mesh.userData.layer = resolvedLayer;
