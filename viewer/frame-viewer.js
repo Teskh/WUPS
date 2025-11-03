@@ -154,6 +154,44 @@ export class FrameViewer {
     this.currentModel = model;
     const maintainCamera = options?.maintainCamera === true;
 
+    const savedCameraState = (() => {
+      if (!maintainCamera || !this.camera) {
+        return null;
+      }
+      const state = {
+        position: this.camera.position.clone(),
+        quaternion: this.camera.quaternion.clone(),
+        zoom: typeof this.camera.zoom === "number" ? this.camera.zoom : null,
+        distance: null,
+        projection: null
+      };
+      if (this.controls) {
+        state.target = this.controls.target.clone();
+        state.distance = state.position.distanceTo(state.target);
+      } else {
+        state.distance = state.position.length();
+      }
+      // Save projection parameters to prevent frustum recalculation
+      if (this.camera.isOrthographicCamera) {
+        state.projection = {
+          left: this.camera.left,
+          right: this.camera.right,
+          top: this.camera.top,
+          bottom: this.camera.bottom,
+          near: this.camera.near,
+          far: this.camera.far
+        };
+      } else if (this.camera.isPerspectiveCamera) {
+        state.projection = {
+          fov: this.camera.fov,
+          aspect: this.camera.aspect,
+          near: this.camera.near,
+          far: this.camera.far
+        };
+      }
+      return state;
+    })();
+
     const minX = model.bounds.minX;
     const minY = model.bounds.minY;
     const wallWidth = model.wall?.width ?? model.bounds.maxX - minX;
@@ -178,7 +216,9 @@ export class FrameViewer {
       width: wallWidth,
       height: wallHeight,
       scale,
-      cameraDistance: safeDistance
+      cameraDistance: maintainCamera && savedCameraState?.distance
+        ? savedCameraState.distance
+        : safeDistance
     };
 
     this.clearHoverState();
@@ -269,7 +309,41 @@ export class FrameViewer {
     }
 
     if (maintainCamera) {
-      this.updateCameraProjection();
+      if (savedCameraState && savedCameraState.projection) {
+        // Restore saved projection parameters to prevent frustum changes
+        if (this.camera.isOrthographicCamera) {
+          this.camera.left = savedCameraState.projection.left;
+          this.camera.right = savedCameraState.projection.right;
+          this.camera.top = savedCameraState.projection.top;
+          this.camera.bottom = savedCameraState.projection.bottom;
+          this.camera.near = savedCameraState.projection.near;
+          this.camera.far = savedCameraState.projection.far;
+        } else if (this.camera.isPerspectiveCamera) {
+          this.camera.fov = savedCameraState.projection.fov;
+          this.camera.aspect = savedCameraState.projection.aspect;
+          this.camera.near = savedCameraState.projection.near;
+          this.camera.far = savedCameraState.projection.far;
+        }
+      } else {
+        // No saved projection state, update normally
+        this.updateCameraProjection();
+      }
+
+      if (savedCameraState) {
+        this.camera.position.copy(savedCameraState.position);
+        this.camera.quaternion.copy(savedCameraState.quaternion);
+        if (this.camera.isOrthographicCamera && typeof savedCameraState.zoom === "number") {
+          this.camera.zoom = savedCameraState.zoom;
+        }
+        this.camera.updateProjectionMatrix();
+
+        if (this.controls && savedCameraState.target) {
+          this.controls.target.copy(savedCameraState.target);
+          this.controls.update();
+          this.camera.position.copy(savedCameraState.position);
+          this.camera.quaternion.copy(savedCameraState.quaternion);
+        }
+      }
       this.requestRender();
     } else {
       this.adjustCamera(wallWidth * scale, wallHeight * scale);
