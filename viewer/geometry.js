@@ -199,6 +199,7 @@ export function createNailRowMesh(row, context) {
 
   instanced.userData.kind = "nailRow";
   instanced.userData.row = row;
+  instanced.userData.editorId = row?.__editorId ?? null;
   instanced.userData.originalMaterial = materials.nailRow;
   instanced.userData.length = length / scale;
   instanced.userData.nails = nailCount;
@@ -309,6 +310,7 @@ export function createBoyOperationMesh(operation, context) {
   group.position.set(worldX, worldY, worldZ);
   group.userData.kind = "boy";
   group.userData.operation = operation;
+  group.userData.editorId = operation?.__editorId ?? null;
   group.userData.plate = candidatePlate ?? null;
   group.userData.targetRole = associatedRole ?? null;
   group.userData.originalMaterial = materials.boyOperation;
@@ -749,6 +751,7 @@ function createPafSegmentMesh(segment, routing, context) {
   mesh.userData.kind = "paf";
   mesh.userData.routing = routing;
   mesh.userData.segment = segment;
+  mesh.userData.editorId = routing?.__editorId ?? null;
   mesh.userData.originalMaterial = materials.pafRouting;
   const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
   mesh.userData.layer = resolvedLayer;

@@ -24,10 +24,30 @@ export function parseWup(wupText) {
     unhandled: []
   };
 
-  const statements = wupText
-    .split(/;\s*/)
-    .map(chunk => chunk.trim())
-    .filter(Boolean);
+  const rawStatements = wupText.split(";");
+  const statements = [];
+  for (const raw of rawStatements) {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      continue;
+    }
+    statements.push(trimmed);
+  }
+
+  model.__statements = statements.slice();
+  model.__sourceText = wupText;
+
+  let nextEditorId = 1;
+  const assignEditorId = element => {
+    if (!element || typeof element !== "object") {
+      return;
+    }
+    if (typeof element.__editorId === "number") {
+      return;
+    }
+    element.__editorId = nextEditorId;
+    nextEditorId += 1;
+  };
 
   let currentModule = null;
   let currentPanel = null;
@@ -102,6 +122,7 @@ export function parseWup(wupText) {
   function finalizeRouting() {
     finalizePolygonSegment();
     if (currentRouting && currentRouting.segments.length > 0) {
+      assignEditorId(currentRouting);
       model.pafRoutings.push(currentRouting);
     } else if (currentRouting) {
       model.unhandled.push({
@@ -113,7 +134,8 @@ export function parseWup(wupText) {
     currentRouting = null;
   }
 
-  for (const statement of statements) {
+  for (let statementIndex = 0; statementIndex < statements.length; statementIndex += 1) {
+    const statement = statements[statementIndex];
     const { command, body } = splitCommand(statement);
     const numbers = extractNumbers(body);
 
@@ -203,7 +225,10 @@ export function parseWup(wupText) {
           segments: [],
           layer: activePanelLayer ?? null,
           source: numbers,
-          body
+          body,
+          __statementIndex: statementIndex,
+          __command: command,
+          __body: body
         };
         break;
       }
@@ -429,8 +454,12 @@ export function parseWup(wupText) {
             spacing: numbers[4] ?? null,
             gauge: numbers[5] ?? null,
             layer,
-            source: numbers
+            source: numbers,
+            __statementIndex: statementIndex,
+            __command: command,
+            __body: body
           };
+          assignEditorId(row);
           model.nailRows.push(row);
           extendBoundsPoint(model.bounds, row.start.x, row.start.y);
           extendBoundsPoint(model.bounds, row.end.x, row.end.y);
@@ -463,8 +492,12 @@ export function parseWup(wupText) {
               targetElement: context?.element ?? null,
               targetKind: context?.kind ?? null,
               targetRole: context?.role ?? null,
-              source: numbers
+              source: numbers,
+              __statementIndex: statementIndex,
+              __command: command,
+              __body: body
             };
+            assignEditorId(operation);
             model.boyOperations.push(operation);
             const radius = Number.isFinite(diameter) ? diameter / 2 : 0;
             extendBoundsPoint(model.bounds, operation.x - radius, operation.z);
@@ -489,6 +522,8 @@ export function parseWup(wupText) {
   if (!Number.isFinite(model.bounds.minX)) {
     throw new Error("No frame members detected in the WUP file");
   }
+
+  model.__nextEditorId = nextEditorId;
 
   return model;
 }

@@ -1,5 +1,6 @@
 import { FrameViewer } from "./viewer/frame-viewer.js";
 import { setupLayerControls } from "./viewer/layer-controls.js";
+import { attachEditor } from "./editor/index.js";
 
 const canvas = document.getElementById("threeCanvas");
 const tooltip = document.getElementById("threeTooltip");
@@ -10,6 +11,7 @@ if (!canvas) {
 
 const viewer = new FrameViewer({ canvas, tooltip });
 
+let editorController = null;
 if (typeof window !== "undefined") {
   window.__frameViewer = viewer;
 }
@@ -36,6 +38,12 @@ if (projectionToggle) {
 
 const layerControls = document.getElementById("layerControls");
 setupLayerControls({ viewer, container: layerControls });
+
+const controlsContainer = document.querySelector(".controls");
+editorController = attachEditor(viewer, { controlsContainer });
+if (typeof window !== "undefined") {
+  window.__editorController = editorController;
+}
 
 const initialModel = window.__lastWupModel;
 if (initialModel?.model) {

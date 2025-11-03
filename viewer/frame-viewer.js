@@ -50,6 +50,11 @@ export class FrameViewer {
     this.modelGroup = new THREE.Group();
     this.scene.add(this.modelGroup);
 
+    this.overlayGroup = new THREE.Group();
+    this.overlayGroup.name = "EditorOverlayGroup";
+    this.overlayGroup.renderOrder = 1000;
+    this.scene.add(this.overlayGroup);
+
     this.layerVisibility = {
       structure: true,
       pli: true,
@@ -119,6 +124,8 @@ export class FrameViewer {
       cameraDistance: 10
     };
 
+    this.currentModel = null;
+
     this.handlePointerMove = this.handlePointerMove.bind(this);
     this.handlePointerLeave = this.handlePointerLeave.bind(this);
     this.handleContextMenu = this.handleContextMenu.bind(this);
@@ -139,10 +146,13 @@ export class FrameViewer {
     this.animate();
   }
 
-  updateModel(model) {
+  updateModel(model, options = {}) {
     if (!model) {
       return;
     }
+
+    this.currentModel = model;
+    const maintainCamera = options?.maintainCamera === true;
 
     const minX = model.bounds.minX;
     const minY = model.bounds.minY;
@@ -158,11 +168,17 @@ export class FrameViewer {
     );
 
     const scale = calculateScale(wallWidth, wallHeight);
+    const diag = Math.sqrt((wallWidth * scale) ** 2 + (wallHeight * scale) ** 2);
+    const halfDiag = diag / 2 || 1;
+    const fovRadians = THREE.MathUtils.degToRad(this.perspectiveFov / 2);
+    const baseDistance = Math.max(halfDiag / Math.tan(fovRadians), 1);
+    const safeDistance = baseDistance * 1.4 + 2;
+
     this.cachedDimensions = {
       width: wallWidth,
       height: wallHeight,
       scale,
-      cameraDistance: this.cachedDimensions.cameraDistance
+      cameraDistance: safeDistance
     };
 
     this.clearHoverState();
@@ -252,7 +268,51 @@ export class FrameViewer {
       }
     }
 
-    this.adjustCamera(wallWidth * scale, wallHeight * scale);
+    if (maintainCamera) {
+      this.updateCameraProjection();
+      this.requestRender();
+    } else {
+      this.adjustCamera(wallWidth * scale, wallHeight * scale);
+    }
+  }
+
+  getCurrentModel() {
+    return this.currentModel;
+  }
+
+  getEditorOverlayGroup() {
+    return this.overlayGroup;
+  }
+
+  clearEditorOverlays() {
+    if (!this.overlayGroup) {
+      return;
+    }
+    while (this.overlayGroup.children.length > 0) {
+      const child = this.overlayGroup.children.pop();
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+      if (child.material) {
+        child.material.dispose?.();
+      }
+    }
+    this.requestRender();
+  }
+
+  addEditorOverlay(object) {
+    if (!object || !this.overlayGroup) {
+      return;
+    }
+    this.overlayGroup.add(object);
+    this.requestRender();
+  }
+
+  removeEditorOverlay(object) {
+    if (!object || !this.overlayGroup) {
+      return;
+    }
+    this.overlayGroup.remove(object);
     this.requestRender();
   }
 
@@ -323,6 +383,42 @@ export class FrameViewer {
       this.tooltip.classList.remove("show");
       this.tooltip.textContent = "";
     }
+  }
+
+  pickObjectAt(clientX, clientY) {
+    if (!this.camera || !this.canvas) {
+      return null;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+
+    const intersects = this.raycaster.intersectObjects(this.modelGroup.children, true);
+    let bestHit = null;
+    let bestPriority = Number.NEGATIVE_INFINITY;
+    for (const intersection of intersects) {
+      const target = resolvePickTarget(intersection.object);
+      if (!target?.userData?.kind) {
+        continue;
+      }
+      const layer = target.userData.layer;
+      if (layer && this.layerVisibility[layer] === false) {
+        continue;
+      }
+      const priority =
+        typeof target.userData.hoverPriority === "number"
+          ? target.userData.hoverPriority
+          : 0;
+      if (
+        priority > bestPriority ||
+        (priority === bestPriority && (!bestHit || intersection.distance < bestHit.distance))
+      ) {
+        bestHit = { object: target, distance: intersection.distance };
+        bestPriority = priority;
+      }
+    }
+    return bestHit?.object ?? null;
   }
 
   handlePointerLeave() {
@@ -608,6 +704,14 @@ export class FrameViewer {
       pli: this.layerVisibility.pli !== false,
       pla: this.layerVisibility.pla !== false
     };
+  }
+
+  getScale() {
+    return this.cachedDimensions?.scale ?? 1;
+  }
+
+  getWallDirection() {
+    return this.wallDir ?? 1;
   }
 
   requestRender() {
