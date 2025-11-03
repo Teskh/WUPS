@@ -124,6 +124,14 @@ export class EditorController {
       controller: this
     });
 
+    // Set up viewer hotkey blocking for editor modes that need keyboard input
+    if (this.viewer) {
+      this.viewer.shouldBlockViewerHotkeys = () => {
+        return this.state.mode === EditorMode.NumericInput ||
+               this.state.mode === EditorMode.CommandPending;
+      };
+    }
+
     this.commands.register("delete", DeleteCommand);
     this.commands.register("translate", TranslateCommand);
 
@@ -190,6 +198,10 @@ export class EditorController {
     }
     if (this.hud?.destroy) {
       this.hud.destroy();
+    }
+    // Clean up viewer hotkey blocking callback
+    if (this.viewer && this.viewer.shouldBlockViewerHotkeys) {
+      this.viewer.shouldBlockViewerHotkeys = null;
     }
   }
 

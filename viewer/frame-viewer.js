@@ -125,6 +125,7 @@ export class FrameViewer {
     };
 
     this.currentModel = null;
+    this.shouldBlockViewerHotkeys = null; // Callback to check if editor is blocking hotkeys
 
     this.handlePointerMove = this.handlePointerMove.bind(this);
     this.handlePointerLeave = this.handlePointerLeave.bind(this);
@@ -508,6 +509,11 @@ export class FrameViewer {
   }
 
   handleKeyDown(event) {
+    // Check if editor is blocking viewer hotkeys (e.g., during numeric input)
+    if (typeof this.shouldBlockViewerHotkeys === "function" && this.shouldBlockViewerHotkeys()) {
+      return;
+    }
+
     switch (event.key) {
       case "1":
         this.resetViewToFace("pli");
