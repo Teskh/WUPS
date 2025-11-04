@@ -692,6 +692,21 @@ function resolvePafSegmentDepthMm(segment, wallThickness) {
   return Math.min(12, wallThickness);
 }
 
+function isFinitePoint(point) {
+  return (
+    point &&
+    Number.isFinite(point.x) &&
+    Number.isFinite(point.y)
+  );
+}
+
+function pointsApproximatelyEqual(a, b, tolerance = 1e-6) {
+  if (!isFinitePoint(a) || !isFinitePoint(b)) {
+    return false;
+  }
+  return Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance;
+}
+
 function isPathClosed(points, tolerance = 1e-6) {
   if (!Array.isArray(points) || points.length < 3) {
     return false;
@@ -711,6 +726,37 @@ function isPathClosed(points, tolerance = 1e-6) {
   );
 }
 
+function extractSegmentEndpoint(segment, keys) {
+  if (!segment) {
+    return null;
+  }
+  for (const key of keys) {
+    if (segment[key] && isFinitePoint(segment[key])) {
+      return segment[key];
+    }
+  }
+  return null;
+}
+
+function pathSegmentsCloseLoop(pathSegments, tolerance = 1e-6) {
+  if (!Array.isArray(pathSegments) || pathSegments.length === 0) {
+    return false;
+  }
+  const firstSegment = pathSegments.find(seg => extractSegmentEndpoint(seg, ["from", "start", "position"]));
+  const lastSegment = [...pathSegments]
+    .reverse()
+    .find(seg => extractSegmentEndpoint(seg, ["to", "end", "position"]));
+  if (!firstSegment || !lastSegment) {
+    return false;
+  }
+  const startPoint = extractSegmentEndpoint(firstSegment, ["from", "start", "position"]);
+  const endPoint = extractSegmentEndpoint(lastSegment, ["to", "end", "position"]);
+  if (!startPoint || !endPoint) {
+    return false;
+  }
+  return pointsApproximatelyEqual(startPoint, endPoint, tolerance);
+}
+
 function computePolygonWindingOrder(points) {
   // Use the shoelace formula to determine polygon winding order
   // Positive area = counter-clockwise, Negative area = clockwise
@@ -727,6 +773,26 @@ function computePolygonWindingOrder(points) {
   }
 
   return Math.sign(area);
+}
+
+function resolvePolygonClosure(segment, dedupedPoints, pathSegments) {
+  if (!segment) {
+    return false;
+  }
+  if (isPathClosed(segment.points)) {
+    return true;
+  }
+  if (Array.isArray(dedupedPoints) && dedupedPoints.length >= 3) {
+    const first = dedupedPoints[0];
+    const last = dedupedPoints[dedupedPoints.length - 1];
+    if (pointsApproximatelyEqual(first, last)) {
+      return true;
+    }
+  }
+  if (pathSegmentsCloseLoop(pathSegments)) {
+    return true;
+  }
+  return false;
 }
 
 function offsetPolygonPoints(points, offsetDistance, options = {}) {
@@ -1065,7 +1131,8 @@ function createPafPolygonMesh(segment, routing, context) {
   if (deduped.length < 3) {
     return null;
   }
-  const isClosedPath = isPathClosed(points);
+  const pathSegments = Array.isArray(segment?.pathSegments) ? segment.pathSegments : null;
+  const isClosedPath = resolvePolygonClosure(segment, deduped, pathSegments);
 
   const worldPoints = deduped.map(point => convertPointToWorld(point, offsets, scale));
   const centroid = worldPoints
@@ -1073,7 +1140,6 @@ function createPafPolygonMesh(segment, routing, context) {
     .multiplyScalar(1 / worldPoints.length);
 
   const shape = new THREE.Shape();
-  const pathSegments = Array.isArray(segment?.pathSegments) ? segment.pathSegments : null;
   if (pathSegments && pathSegments.length > 0) {
     const firstSegment = pathSegments[0];
     const initialPoint = firstSegment?.from ?? deduped[0];
@@ -1137,7 +1203,7 @@ function createPafPolygonMesh(segment, routing, context) {
   const highlightMaterial = isUndercut ? highlightMaterials.pafRoutingLineDashed : highlightMaterials.pafRoutingLine;
 
   // Create main path line geometry
-  const geometry = createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, lineZ);
+  const geometry = createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, lineZ, isClosedPath);
 
   const line = new THREE.LineSegments(geometry, baseMaterial);
 
