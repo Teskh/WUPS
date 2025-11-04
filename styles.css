@@ -300,11 +300,39 @@ body {
   display: none;
 }
 
+.paf-parameter-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .paf-parameter-menu h3 {
   margin: 0;
   font-size: 0.9rem;
   font-weight: 600;
   color: rgba(15, 23, 42, 0.85);
+}
+
+.paf-view-source-btn {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(79, 70, 229, 0.3);
+  background: rgba(79, 70, 229, 0.08);
+  color: rgba(55, 48, 163, 0.9);
+  cursor: pointer;
+  transition: all 120ms ease-in-out;
+  white-space: nowrap;
+}
+
+.paf-view-source-btn:hover {
+  background: rgba(79, 70, 229, 0.15);
+  border-color: rgba(79, 70, 229, 0.4);
+}
+
+.paf-view-source-btn:active {
+  background: rgba(79, 70, 229, 0.2);
 }
 
 .paf-param-list {
@@ -331,6 +359,104 @@ body {
   color: rgba(15, 23, 42, 0.9);
   text-align: right;
   max-width: 14rem;
+}
+
+/* Source Viewer Styles */
+.source-viewer {
+  border: 1px solid rgba(31, 42, 55, 0.28);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.75);
+  display: grid;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  max-width: 100%;
+  margin-top: 0.75rem;
+}
+
+.source-viewer.hidden {
+  display: none;
+}
+
+.source-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(31, 42, 55, 0.15);
+}
+
+.source-viewer h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.85);
+}
+
+.source-viewer-close {
+  padding: 0.15rem 0.5rem;
+  font-size: 1.2rem;
+  line-height: 1;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(31, 42, 55, 0.2);
+  background: rgba(255, 255, 255, 0.6);
+  color: rgba(31, 42, 55, 0.7);
+  cursor: pointer;
+  transition: all 120ms ease-in-out;
+}
+
+.source-viewer-close:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgba(220, 38, 38, 0.9);
+}
+
+.source-viewer-code {
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  background: rgba(15, 23, 42, 0.04);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+}
+
+.source-line {
+  margin: 0.15rem 0;
+  padding: 0.1rem 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.source-line .has-tooltip {
+  cursor: help;
+  border-bottom: 1px dotted rgba(79, 70, 229, 0.4);
+  transition: background 120ms ease-in-out;
+}
+
+.source-line .has-tooltip:hover {
+  background: rgba(79, 70, 229, 0.08);
+}
+
+.source-line .token-command {
+  color: rgba(139, 92, 246, 0.9);
+  font-weight: 600;
+}
+
+.source-line .token-parameter {
+  color: rgba(5, 150, 105, 0.9);
+}
+
+.source-line .token-punctuation {
+  color: rgba(31, 42, 55, 0.6);
+}
+
+.source-viewer-empty {
+  padding: 1rem;
+  text-align: center;
+  color: rgba(31, 42, 55, 0.6);
+  font-style: italic;
 }
 
 .editor-hud {

@@ -156,7 +156,7 @@ function updateRow(row, payload) {
   element.title = tooltip ?? "";
 }
 
-export function createPafParameterMenu({ container } = {}) {
+export function createPafParameterMenu({ container, onViewSource } = {}) {
   if (!container || typeof document === "undefined") {
     return {
       updateSelection: () => {},
@@ -166,9 +166,22 @@ export function createPafParameterMenu({ container } = {}) {
 
   const root = document.createElement("section");
   root.className = "paf-parameter-menu hidden";
+
+  const header = document.createElement("div");
+  header.className = "paf-parameter-menu-header";
+
   const heading = document.createElement("h3");
   heading.textContent = "PAF Parameters";
-  root.appendChild(heading);
+  header.appendChild(heading);
+
+  const viewSourceBtn = document.createElement("button");
+  viewSourceBtn.type = "button";
+  viewSourceBtn.className = "paf-view-source-btn";
+  viewSourceBtn.textContent = "View Source";
+  viewSourceBtn.title = "View the WUP source code for this operation";
+  header.appendChild(viewSourceBtn);
+
+  root.appendChild(header);
 
   const list = document.createElement("div");
   list.className = "paf-param-list";
@@ -200,7 +213,10 @@ export function createPafParameterMenu({ container } = {}) {
     root.classList.remove("hidden");
   }
 
+  let currentSelection = null;
+
   function updateSelection(selection) {
+    currentSelection = selection;
     const pafObject = Array.isArray(selection)
       ? selection.find(item => item?.userData?.kind === "paf")
       : null;
@@ -301,9 +317,18 @@ export function createPafParameterMenu({ container } = {}) {
     show();
   }
 
+  function handleViewSource() {
+    if (onViewSource && currentSelection) {
+      onViewSource(currentSelection);
+    }
+  }
+
+  viewSourceBtn.addEventListener("click", handleViewSource);
+
   return {
     updateSelection,
     cleanup() {
+      viewSourceBtn.removeEventListener("click", handleViewSource);
       if (root.parentNode) {
         root.parentNode.removeChild(root);
       }

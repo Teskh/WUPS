@@ -8,6 +8,7 @@ import { OverlayManager } from "./overlays/overlay-manager.js";
 import { Keymap } from "./ui/keymap.js";
 import { createEditControls } from "./ui/edit-controls.js";
 import { createPafParameterMenu } from "./ui/paf-parameter-menu.js";
+import { createSourceViewer } from "./ui/source-viewer.js";
 import { createHud } from "./ui/hud.js";
 import { DeleteCommand } from "./commands/delete.js";
 import { TranslateCommand } from "./commands/move-translate.js";
@@ -193,6 +194,7 @@ export class EditorController {
     this.hud = typeof document !== "undefined" ? createHud() : null;
     this.controls = null;
     this.pafMenu = null;
+    this.sourceViewer = null;
     this.activeCommand = null;
     this.workingStatements = [];
 
@@ -204,6 +206,9 @@ export class EditorController {
       }
       if (this.pafMenu?.updateSelection) {
         this.pafMenu.updateSelection(selection);
+      }
+      if (this.sourceViewer?.updateSelection) {
+        this.sourceViewer.updateSelection(selection, this.workingModel);
       }
     });
 
@@ -233,7 +238,20 @@ export class EditorController {
         selection: this.selection,
         controller: this
       });
-      this.pafMenu = createPafParameterMenu({ container });
+
+      // Create source viewer
+      this.sourceViewer = createSourceViewer({ container, state: this.state });
+
+      // Create PAF menu with View Source callback
+      this.pafMenu = createPafParameterMenu({
+        container,
+        onViewSource: (selection) => {
+          if (this.sourceViewer) {
+            this.sourceViewer.updateSelection(selection, this.workingModel);
+            this.sourceViewer.show();
+          }
+        }
+      });
     }
 
     const initialModel = viewer.getCurrentModel?.();
@@ -254,6 +272,9 @@ export class EditorController {
     }
     if (this.pafMenu?.cleanup) {
       this.pafMenu.cleanup();
+    }
+    if (this.sourceViewer?.cleanup) {
+      this.sourceViewer.cleanup();
     }
     if (this.hud?.destroy) {
       this.hud.destroy();
