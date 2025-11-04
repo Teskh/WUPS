@@ -18,6 +18,17 @@ const TEMPLATE_COMMANDS = [
   { command: "PP", dx: -18, dy: 26 }
 ];
 
+function getTemplateCommands(orientationType) {
+  if (orientationType === "vertical") {
+    return TEMPLATE_COMMANDS.map(entry => ({
+      ...entry,
+      dx: entry.dy,
+      dy: -entry.dx
+    }));
+  }
+  return TEMPLATE_COMMANDS.map(entry => ({ ...entry }));
+}
+
 function formatNumber(value) {
   if (!Number.isFinite(value)) {
     return "0";
@@ -44,6 +55,7 @@ function formatNumber(value) {
  * @param {string|null} [options.layer=null] - Target layer.
  * @param {string} [options.command="PAF"] - Routing command token (normally "PAF").
  * @param {string} [options.body=""] - Original routing body string.
+ * @param {"horizontal"|"vertical"} [options.orientationType="horizontal"] - Layout orientation.
  */
 export function createModernOutletRouting(options) {
   const {
@@ -57,7 +69,8 @@ export function createModernOutletRouting(options) {
     passes = null,
     layer = null,
     command = "PAF",
-    body = ""
+    body = "",
+    orientationType = "horizontal"
   } = options ?? {};
 
   if (!center || !Number.isFinite(center.x) || !Number.isFinite(center.y)) {
@@ -77,7 +90,9 @@ export function createModernOutletRouting(options) {
   statements.push(headerLine);
   snippetLines.push(`${headerLine};`);
 
-  for (const entry of TEMPLATE_COMMANDS) {
+  const templateCommands = getTemplateCommands(orientationType);
+
+  for (const entry of templateCommands) {
     const x = center.x + entry.dx;
     const y = center.y + entry.dy;
 

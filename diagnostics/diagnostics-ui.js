@@ -349,11 +349,12 @@ function createCheckSection(check) {
 
     let replaceButton = '';
     if (!result.passed && result.replacement) {
-      const isHorizontal = result.replacement.orientation === "horizontal";
-      const disabledAttr = isHorizontal ? "" : " disabled";
-      const title = isHorizontal
+      const orientation = result.replacement.orientation;
+      const supportedOrientation = orientation === "horizontal" || orientation === "vertical";
+      const disabledAttr = supportedOrientation ? "" : " disabled";
+      const title = supportedOrientation
         ? "Replace legacy outlet with modern routing"
-        : "Replacement available for horizontal outlets only";
+        : "Replacement not yet supported for this orientation";
       replaceButton = `<button class="replace-legacy-outlet"${disabledAttr} type="button" title="${title}">Replace</button>`;
     }
 
@@ -486,8 +487,9 @@ function handleReplaceOutlet(result) {
     return;
   }
 
-  if (replacement.orientation !== "horizontal") {
-    alert("Outlet replacement is currently supported for horizontal outlets only.");
+  const orientation = replacement.orientation;
+  if (orientation !== "horizontal" && orientation !== "vertical") {
+    alert("Outlet replacement is not supported for this outlet orientation.");
     return;
   }
 
@@ -578,6 +580,10 @@ function applyOutletReplacement(model, replacement) {
   const sortedIndices = Array.from(statementIndexSet).sort((a, b) => a - b);
   const insertionIndex = sortedIndices[0];
 
+  const orientationType = typeof replacement.orientation === "string"
+    ? replacement.orientation
+    : "horizontal";
+
   const { statements: modernStatements } = createModernOutletRouting({
     center: replacement.center,
     depth: depthValue,
@@ -589,7 +595,8 @@ function applyOutletReplacement(model, replacement) {
     passes: replacement.passes ?? targetRouting.passes ?? null,
     layer: replacement.layer ?? targetRouting.layer ?? null,
     command: replacement.command ?? targetRouting.__command ?? "PAF",
-    body: replacement.body ?? targetRouting.body ?? ""
+    body: replacement.body ?? targetRouting.body ?? "",
+    orientationType
   });
 
   const updatedStatements = [];
