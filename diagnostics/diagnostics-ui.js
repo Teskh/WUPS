@@ -494,6 +494,15 @@ function handleReplaceOutlet(result) {
   }
 
   try {
+    // Store the expanded state of check sections before re-rendering
+    const expandedStates = new Map();
+    const checkHeaders = document.querySelectorAll(".check-header .expand-toggle");
+    checkHeaders.forEach(header => {
+      const isExpanded = header.getAttribute("aria-expanded") === "true";
+      const checkTitle = header.querySelector(".check-title")?.textContent || "";
+      expandedStates.set(checkTitle, isExpanded);
+    });
+
     const updatedModel = applyOutletReplacement(currentModel, replacement);
     currentModel = updatedModel;
 
@@ -514,6 +523,21 @@ function handleReplaceOutlet(result) {
 
     const updatedResult = runDiagnostic("outlet", updatedModel);
     displaySingleResult(updatedResult);
+
+    // Restore the expanded state of check sections
+    const newCheckHeaders = document.querySelectorAll(".check-header .expand-toggle");
+    newCheckHeaders.forEach(header => {
+      const checkTitle = header.querySelector(".check-title")?.textContent || "";
+      const shouldBeExpanded = expandedStates.get(checkTitle);
+      if (shouldBeExpanded !== undefined) {
+        const checkContent = header.closest(".check-header").nextElementSibling;
+        if (shouldBeExpanded && checkContent?.classList.contains("collapsed")) {
+          checkContent.classList.remove("collapsed");
+          header.setAttribute("aria-expanded", "true");
+          header.querySelector(".toggle-icon").textContent = "▼";
+        }
+      }
+    });
 
     const saveButton = document.getElementById("saveDiagnostics");
     if (saveButton) {
