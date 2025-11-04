@@ -336,9 +336,14 @@ function createCheckSection(check) {
     const checkbox = result.passed ? "✓" : "✗";
     const statusClass = result.passed ? "check-pass" : "check-fail";
 
-    // Add zoom button for failed items with BOY operations
-    const zoomButton = !result.passed && result.boy ?
-      `<button class="zoom-to-error" data-boy-x="${result.boy.x}" data-boy-z="${result.boy.z}" title="Zoom to this BOY">🔍</button>` : '';
+    // Add zoom button for items with position data (BOY operations or outlets)
+    let zoomButton = '';
+    if (!result.passed && result.boy) {
+      zoomButton = `<button class="zoom-to-error" data-boy-x="${result.boy.x}" data-boy-z="${result.boy.z}" title="Zoom to this BOY">🔍</button>`;
+    } else if (result.position) {
+      // For outlets or other items with position data
+      zoomButton = `<button class="zoom-to-outlet" data-x="${result.position.x}" data-y="${result.position.y}" title="Zoom to this location">🔍</button>`;
+    }
 
     item.innerHTML = `
       <div class="result-summary">
@@ -375,14 +380,25 @@ function createCheckSection(check) {
       });
     }
 
-    // Add zoom button handler
-    const zoomBtn = item.querySelector(".zoom-to-error");
-    if (zoomBtn) {
-      zoomBtn.addEventListener("click", (e) => {
+    // Add zoom button handlers
+    const zoomBoyBtn = item.querySelector(".zoom-to-error");
+    if (zoomBoyBtn) {
+      zoomBoyBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        const boyX = parseFloat(zoomBtn.dataset.boyX);
-        const boyZ = parseFloat(zoomBtn.dataset.boyZ);
+        const boyX = parseFloat(zoomBoyBtn.dataset.boyX);
+        const boyZ = parseFloat(zoomBoyBtn.dataset.boyZ);
         zoomToBoy(boyX, boyZ);
+        hideDiagnostics();
+      });
+    }
+
+    const zoomOutletBtn = item.querySelector(".zoom-to-outlet");
+    if (zoomOutletBtn) {
+      zoomOutletBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const x = parseFloat(zoomOutletBtn.dataset.x);
+        const y = parseFloat(zoomOutletBtn.dataset.y);
+        zoomToPosition(x, y);
         hideDiagnostics();
       });
     }
@@ -414,6 +430,20 @@ function zoomToBoy(boyX, boyZ) {
     document.dispatchEvent(
       new CustomEvent("diagnostics:zoomToBoy", {
         detail: { x: boyX, z: boyZ }
+      })
+    );
+  }
+}
+
+/**
+ * Zoom the 3D viewer to a specific position (e.g., outlet)
+ */
+function zoomToPosition(x, y) {
+  // Dispatch event for the 3D viewer to handle
+  if (typeof document !== "undefined") {
+    document.dispatchEvent(
+      new CustomEvent("diagnostics:zoomToPosition", {
+        detail: { x, y }
       })
     );
   }

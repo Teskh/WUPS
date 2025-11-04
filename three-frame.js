@@ -58,3 +58,8 @@ document.addEventListener("diagnostics:zoomToBoy", event => {
   const { x, z } = event.detail;
   viewer.zoomToBoy(x, z);
 });
+
+document.addEventListener("diagnostics:zoomToPosition", event => {
+  const { x, y } = event.detail;
+  viewer.zoomToPosition(x, y);
+});

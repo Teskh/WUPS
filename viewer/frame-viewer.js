@@ -868,7 +868,105 @@ export class FrameViewer {
     this.highlightBoy(targetMesh);
   }
 
+  zoomToPosition(x, y) {
+    // Find a mesh near the specified x, y position
+    // This is used for outlets and other PAF operations
+    let targetMesh = null;
+    const tolerance = 50; // mm tolerance for position matching (larger since we're looking for area)
+
+    const searchGroups = [
+      this.groups?.plaPafRoutings,
+      this.groups?.pliPafRoutings
+    ].filter(g => g);
+
+    if (searchGroups.length === 0) {
+      console.warn('PAF routing groups not found');
+      return;
+    }
+
+    // Search for a mesh near the target position
+    for (const group of searchGroups) {
+      for (const child of group.children) {
+        if (child.userData?.routing) {
+          // Check if any segment in this routing is near the target position
+          const routing = child.userData.routing;
+          if (routing.segments) {
+            for (const segment of routing.segments) {
+              let isNear = false;
+
+              if (segment.kind === "polygon" && segment.points) {
+                // Check if any point is near the target
+                for (const point of segment.points) {
+                  if (Math.abs(point.x - x) < tolerance && Math.abs(point.y - y) < tolerance) {
+                    isNear = true;
+                    break;
+                  }
+                }
+              } else if (segment.kind === "circle" && segment.position) {
+                // Check if circle position is near the target
+                if (Math.abs(segment.position.x - x) < tolerance && Math.abs(segment.position.y - y) < tolerance) {
+                  isNear = true;
+                }
+              }
+
+              if (isNear) {
+                targetMesh = child;
+                break;
+              }
+            }
+          }
+
+          if (targetMesh) break;
+        }
+      }
+      if (targetMesh) break;
+    }
+
+    if (!targetMesh) {
+      console.warn(`No mesh found near position x=${x}, y=${y}`);
+      // Fallback: just zoom to the specified position
+      const worldPos = new THREE.Vector3(x, y, 0);
+      this.zoomToWorldPosition(worldPos);
+      return;
+    }
+
+    // Get the world position of the mesh
+    const worldPos = new THREE.Vector3();
+    targetMesh.getWorldPosition(worldPos);
+
+    this.zoomToWorldPosition(worldPos);
+    this.highlightMesh(targetMesh);
+  }
+
+  zoomToWorldPosition(worldPos) {
+    // Switch to perspective for better depth perception
+    if (this.projectionMode !== "perspective") {
+      this.setProjectionMode("perspective");
+    }
+
+    // Move camera to focus on this position
+    if (this.controls && this.camera) {
+      // Set controls target to the position
+      this.controls.target.copy(worldPos);
+
+      // Position camera close for detailed view (scale * 400mm away)
+      const scale = this.cachedDimensions.scale || 1;
+      const closeDistance = scale * 400; // About 400mm from the target
+
+      // Position camera at an angle for better 3D view
+      const offset = new THREE.Vector3(closeDistance * 0.4, closeDistance * 0.25, closeDistance);
+      this.camera.position.copy(worldPos).add(offset);
+
+      this.controls.update();
+      this.requestRender();
+    }
+  }
+
   highlightBoy(boyMesh) {
+    this.highlightMesh(boyMesh);
+  }
+
+  highlightMesh(mesh) {
     // Create a pulsing highlight effect
     let pulseCount = 0;
     const maxPulses = 6;
@@ -877,8 +975,8 @@ export class FrameViewer {
     const pulse = () => {
       if (pulseCount >= maxPulses) {
         // Reset to normal after pulsing
-        if (boyMesh.userData.setHoverState) {
-          boyMesh.userData.setHoverState(false);
+        if (mesh.userData.setHoverState) {
+          mesh.userData.setHoverState(false);
           this.requestRender();
         }
         return;
@@ -886,8 +984,8 @@ export class FrameViewer {
 
       // Toggle highlight state
       const shouldHighlight = pulseCount % 2 === 0;
-      if (boyMesh.userData.setHoverState) {
-        boyMesh.userData.setHoverState(shouldHighlight);
+      if (mesh.userData.setHoverState) {
+        mesh.userData.setHoverState(shouldHighlight);
         this.requestRender();
       }
 

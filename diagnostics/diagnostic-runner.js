@@ -6,6 +6,7 @@
  */
 
 import { runBoyDiagnostics, formatDiagnosticReport as formatBoyReport } from "./boy-diagnostics.js";
+import { runOutletDiagnostics, formatOutletReport } from "./outlet-diagnostics.js";
 
 /**
  * Registry of available diagnostics
@@ -16,6 +17,12 @@ const DIAGNOSTICS = {
     description: "Validates BOY (Blind Operation Y-axis) drilling operations",
     runner: runBoyDiagnostics,
     formatter: formatBoyReport
+  },
+  outlet: {
+    name: "Electrical Outlets",
+    description: "Detects legacy electrical outlet cuts with box and circular cuts",
+    runner: runOutletDiagnostics,
+    formatter: formatOutletReport
   }
   // Future diagnostics can be added here:
   // paf: { ... },

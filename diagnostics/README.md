@@ -13,6 +13,24 @@ Validates BOY (Blind Operation Y-axis) drilling operations with four checks:
 3. **Stud Distance Check**: Verifies that the BOY outer edge is at least 10mm from the nearest stud (QS) edge
 4. **Diameter Check**: Confirms that the BOY diameter is 30mm (within tolerance)
 
+### Electrical Outlet Diagnostics (`outlet-diagnostics.js`)
+
+Detects legacy electrical outlet cuts that need to be updated to the modern format. Legacy outlets are identified by:
+
+1. **Box Cut**: A closed polygon with exactly 4 corners (5 PP points with first and last matching)
+2. **Circular Cuts**: Two MP (Milling Point) circular cuts
+3. **Alignment**: The circular cuts are positioned such that their edge (center ± radius) aligns with one of the box corners
+
+**Detection Logic:**
+- For horizontal outlets: The Y coordinate of the MP minus its radius matches one of the box's Y corners
+- For vertical outlets: The X coordinate of the MP minus its radius matches one of the box's X corners
+
+**Features:**
+- Automatically detects all legacy outlets in the model
+- Provides dimensional information (box size, circle radius)
+- Includes a zoom button to focus on each detected outlet in the 3D view
+- Reports orientation (horizontal/vertical) for each outlet
+
 ## Usage
 
 ### Via UI
@@ -48,8 +66,12 @@ After loading a WUP file in the browser, you can run diagnostics from the consol
 
 ```javascript
 // Run BOY diagnostics
-const results = runBoyDiagnostics(window.__lastWupModel.model);
-console.log(formatDiagnosticReport(results));
+const boyResults = runBoyDiagnostics(window.__lastWupModel.model);
+console.log(formatDiagnosticReport(boyResults));
+
+// Run outlet diagnostics
+const outletResults = runOutletDiagnostics(window.__lastWupModel.model);
+console.log(formatOutletReport(outletResults));
 
 // Run all diagnostics
 const allResults = runAllDiagnostics(window.__lastWupModel.model);
@@ -64,6 +86,7 @@ saveDiagnosticResults(allResults);
 ### Files
 
 - **`boy-diagnostics.js`**: BOY-specific diagnostic logic
+- **`outlet-diagnostics.js`**: Electrical outlet diagnostic logic
 - **`diagnostic-runner.js`**: Manages and executes all diagnostics
 - **`diagnostics-ui.js`**: UI component for interactive diagnostics
 - **`diagnostics-styles.css`**: Styling for the diagnostics panel
@@ -174,11 +197,23 @@ BOY operations should have a diameter of exactly 30mm (with 0.1mm tolerance). Th
 
 To test the diagnostics:
 
+**BOY Diagnostics:**
 1. Load `example2.wup` which contains BOY operations
 2. Run the diagnostics
 3. Verify that results are displayed correctly
 4. Check that expandable sections work
-5. Test saving the report
+5. Test the zoom functionality for failed BOY checks
+
+**Outlet Diagnostics:**
+1. Load `probeta.wup` which contains legacy outlet cuts
+2. Run the outlet diagnostics or all diagnostics
+3. Verify that legacy outlets are detected
+4. Check the dimensional information is accurate
+5. Test the zoom button to focus on detected outlets in the 3D view
+
+**General:**
+1. Test saving the report to a file
+2. Verify that the diagnostics panel UI works correctly
 
 ## Future Enhancements
 
