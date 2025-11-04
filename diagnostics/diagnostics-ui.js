@@ -11,6 +11,7 @@ import {
   saveDiagnosticResults
 } from "./diagnostic-runner.js";
 import { createModernOutletRouting } from "./outlet-modernizer.js";
+import { parseWup, normalizeModel } from "../wup-parser.js";
 
 let currentModel = null;
 let diagnosticsPanel = null;
@@ -491,9 +492,25 @@ function handleReplaceOutlet(result) {
   }
 
   try {
-    applyOutletReplacement(currentModel, replacement);
-    refreshModelInViewer(currentModel);
-    const updatedResult = runDiagnostic("outlet", currentModel);
+    const updatedModel = applyOutletReplacement(currentModel, replacement);
+    currentModel = updatedModel;
+
+    const label = window.__lastWupModel?.label ?? "model.wup";
+    if (window.__lastWupModel) {
+      window.__lastWupModel.model = updatedModel;
+      window.__lastWupModel.label = label;
+    } else {
+      window.__lastWupModel = { model: updatedModel, label };
+    }
+
+    const editorController = window.__editorController;
+    if (editorController?.setModel) {
+      editorController.setModel(updatedModel, label);
+    } else {
+      refreshModelInViewer(updatedModel);
+    }
+
+    const updatedResult = runDiagnostic("outlet", updatedModel);
     displaySingleResult(updatedResult);
 
     const saveButton = document.getElementById("saveDiagnostics");
@@ -512,21 +529,24 @@ function applyOutletReplacement(model, replacement) {
     throw new Error("Model does not contain any PAF routings.");
   }
 
+  if (!Array.isArray(model.__statements) || model.__statements.length === 0) {
+    throw new Error("Model source statements are unavailable; cannot apply replacement.");
+  }
+
   const boxId = replacement.boxRoutingEditorId;
   if (typeof boxId !== "number") {
     throw new Error("Legacy outlet routing identifier is missing.");
   }
 
-  const targetIndex = model.pafRoutings.findIndex(
+  const targetRouting = model.pafRoutings.find(
     routing => routing && typeof routing.__editorId === "number" && routing.__editorId === boxId
   );
 
-  if (targetIndex === -1) {
+  if (!targetRouting) {
     throw new Error("Legacy outlet routing could not be located in the current model.");
   }
 
-  const existingRouting = model.pafRoutings[targetIndex];
-  const legacyParams = extractLegacyRoutingParams(existingRouting);
+  const legacyParams = extractLegacyRoutingParams(targetRouting);
   const depthValue = Number.isFinite(replacement.depth) ? replacement.depth : legacyParams.depth;
   const orientationValue = Number.isFinite(replacement.orientationValue)
     ? replacement.orientationValue
@@ -534,53 +554,68 @@ function applyOutletReplacement(model, replacement) {
   const zValue = Number.isFinite(replacement.zValue) ? replacement.zValue : legacyParams.zValue;
   const headerSource = Array.isArray(replacement.headerSource) && replacement.headerSource.length > 0
     ? replacement.headerSource.filter(num => Number.isFinite(num))
-    : (Array.isArray(existingRouting.source) ? existingRouting.source.filter(num => Number.isFinite(num)) : []);
+    : (Array.isArray(targetRouting.source)
+        ? targetRouting.source.filter(num => Number.isFinite(num))
+        : []);
 
-  const newRouting = createModernOutletRouting({
+  const circleRoutings = (replacement.circleRoutingEditorIds ?? [])
+    .map(id => model.pafRoutings.find(routing => routing?.__editorId === id))
+    .filter(Boolean);
+
+  const statementIndexSet = new Set();
+  for (const routing of [targetRouting, ...circleRoutings]) {
+    for (const index of routing?.__statementIndices ?? []) {
+      if (Number.isInteger(index) && index >= 0) {
+        statementIndexSet.add(index);
+      }
+    }
+  }
+
+  if (statementIndexSet.size === 0) {
+    throw new Error("Unable to resolve source statements for the legacy outlet routings.");
+  }
+
+  const sortedIndices = Array.from(statementIndexSet).sort((a, b) => a - b);
+  const insertionIndex = sortedIndices[0];
+
+  const { statements: modernStatements } = createModernOutletRouting({
     center: replacement.center,
     depth: depthValue,
     zValue,
     orientationValue,
     headerSource,
-    tool: replacement.tool ?? existingRouting.tool ?? null,
-    face: replacement.face ?? existingRouting.face ?? null,
-    passes: replacement.passes ?? existingRouting.passes ?? null,
-    layer: replacement.layer ?? existingRouting.layer ?? null,
-    command: replacement.command ?? existingRouting.__command ?? "PAF",
-    body: replacement.body ?? existingRouting.body ?? ""
+    tool: replacement.tool ?? targetRouting.tool ?? null,
+    face: replacement.face ?? targetRouting.face ?? null,
+    passes: replacement.passes ?? targetRouting.passes ?? null,
+    layer: replacement.layer ?? targetRouting.layer ?? null,
+    command: replacement.command ?? targetRouting.__command ?? "PAF",
+    body: replacement.body ?? targetRouting.body ?? ""
   });
 
-  newRouting.__editorId = existingRouting.__editorId;
-  newRouting.__command = existingRouting.__command ?? replacement.command ?? "PAF";
-  newRouting.__body = existingRouting.__body ?? replacement.body ?? "";
-  newRouting.body = replacement.body ?? existingRouting.body ?? "";
-  if (Array.isArray(existingRouting.__statementIndices)) {
-    newRouting.__statementIndices = [...existingRouting.__statementIndices];
-  }
-  if (typeof existingRouting.__statementIndex === "number") {
-    newRouting.__statementIndex = existingRouting.__statementIndex;
-  }
+  const updatedStatements = [];
+  let inserted = false;
+  const indexSet = new Set(sortedIndices);
 
-  model.pafRoutings[targetIndex] = newRouting;
-
-  const circleIds = new Set(
-    (replacement.circleRoutingEditorIds ?? []).filter(id => typeof id === "number")
-  );
-  if (circleIds.size > 0) {
-    model.pafRoutings = model.pafRoutings.filter(routing => {
-      const id = routing?.__editorId;
-      if (typeof id !== "number") {
-        return true;
-      }
-      return !circleIds.has(id);
-    });
+  for (let i = 0; i < model.__statements.length; i += 1) {
+    if (!inserted && i === insertionIndex) {
+      updatedStatements.push(...modernStatements);
+      inserted = true;
+    }
+    if (indexSet.has(i)) {
+      continue;
+    }
+    updatedStatements.push(model.__statements[i]);
   }
 
-  ensureModelBounds(model);
-  extendBoundsWithRouting(model.bounds, newRouting);
-  updateModelViewDimensions(model);
+  if (!inserted) {
+    updatedStatements.push(...modernStatements);
+  }
 
-  return model;
+  const updatedText = `${updatedStatements.map(stmt => `${stmt.trim()};`).join("\n")}\n`;
+
+  const parsed = parseWup(updatedText);
+  const normalized = normalizeModel(parsed);
+  return normalized;
 }
 
 function extractLegacyRoutingParams(routing) {
@@ -599,59 +634,6 @@ function extractLegacyRoutingParams(routing) {
     orientation: Number.isFinite(orientation) ? orientation : 0,
     zValue
   };
-}
-
-function ensureModelBounds(model) {
-  if (!model.bounds) {
-    model.bounds = {
-      minX: Number.POSITIVE_INFINITY,
-      minY: Number.POSITIVE_INFINITY,
-      maxX: Number.NEGATIVE_INFINITY,
-      maxY: Number.NEGATIVE_INFINITY
-    };
-  }
-}
-
-function extendBoundsWithRouting(bounds, routing) {
-  if (!bounds || !routing) {
-    return;
-  }
-
-  const segments = routing.segments ?? [];
-  for (const segment of segments) {
-    if (Array.isArray(segment?.points)) {
-      for (const point of segment.points) {
-        if (!point) {
-          continue;
-        }
-        const { x, y } = point;
-        if (Number.isFinite(x) && Number.isFinite(y)) {
-          bounds.minX = Math.min(bounds.minX, x);
-          bounds.minY = Math.min(bounds.minY, y);
-          bounds.maxX = Math.max(bounds.maxX, x);
-          bounds.maxY = Math.max(bounds.maxY, y);
-        }
-      }
-    }
-  }
-}
-
-function updateModelViewDimensions(model) {
-  if (!model) {
-    return;
-  }
-  if (!model.view) {
-    model.view = {};
-  }
-  if (model.wall && Number.isFinite(model.wall.width) && Number.isFinite(model.wall.height)) {
-    model.view.width = model.wall.width;
-    model.view.height = model.wall.height;
-    return;
-  }
-  if (model.bounds) {
-    model.view.width = model.bounds.maxX - model.bounds.minX;
-    model.view.height = model.bounds.maxY - model.bounds.minY;
-  }
 }
 
 function refreshModelInViewer(model) {

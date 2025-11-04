@@ -31,6 +31,7 @@ function formatNumber(value) {
 
 /**
  * Build a modern horizontal outlet routing using the standard template.
+ * Returns both a routing object and the statement strings needed to serialize it.
  * @param {object} options
  * @param {{x:number,y:number}} options.center - Desired outlet center point.
  * @param {number} options.depth - Routing depth (matches legacy depth).
@@ -67,28 +68,31 @@ export function createModernOutletRouting(options) {
   const trailingValue = Number.isFinite(zValue) ? zValue : depthValue;
   const orientation = Number.isFinite(orientationValue) ? orientationValue : 0;
 
-  const headerLine = Array.isArray(headerSource) && headerSource.length > 0
-    ? `${command} ${headerSource.map(formatNumber).join(",")};`
-    : `${command};`;
+  const statements = [];
+  const snippetLines = [];
 
-  const lines = [headerLine];
+  const headerLine = Array.isArray(headerSource) && headerSource.length > 0
+    ? `${command} ${headerSource.map(formatNumber).join(",")}`
+    : command;
+  statements.push(headerLine);
+  snippetLines.push(`${headerLine};`);
 
   for (const entry of TEMPLATE_COMMANDS) {
     const x = center.x + entry.dx;
     const y = center.y + entry.dy;
 
     if (entry.command === "PP") {
-      lines.push(
-        `PP ${formatNumber(x)},${formatNumber(y)},${formatNumber(depthValue)},${formatNumber(CONTROL_CODE)},${formatNumber(orientation)},${formatNumber(trailingValue)};`
-      );
+      const line = `PP ${formatNumber(x)},${formatNumber(y)},${formatNumber(depthValue)},${formatNumber(CONTROL_CODE)},${formatNumber(orientation)},${formatNumber(trailingValue)}`;
+      statements.push(line);
+      snippetLines.push(`${line};`);
     } else if (entry.command === "KB") {
-      lines.push(
-        `KB ${formatNumber(x)},${formatNumber(y)},${formatNumber(entry.radius)},${entry.arcType},${formatNumber(depthValue)},${formatNumber(CONTROL_CODE)},${formatNumber(orientation)},${formatNumber(trailingValue)};`
-      );
+      const line = `KB ${formatNumber(x)},${formatNumber(y)},${formatNumber(entry.radius)},${entry.arcType},${formatNumber(depthValue)},${formatNumber(CONTROL_CODE)},${formatNumber(orientation)},${formatNumber(trailingValue)}`;
+      statements.push(line);
+      snippetLines.push(`${line};`);
     }
   }
 
-  const snippet = `${lines.join("\n")}\n`;
+  const snippet = `${snippetLines.join("\n")}\n`;
   const parsed = parseWup(snippet);
   const newRouting = parsed?.pafRoutings?.[0];
 
@@ -105,5 +109,9 @@ export function createModernOutletRouting(options) {
   newRouting.__command = command;
   newRouting.__body = body;
 
-  return newRouting;
+  return {
+    routing: newRouting,
+    statements,
+    snippet
+  };
 }
