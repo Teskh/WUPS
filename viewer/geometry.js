@@ -895,6 +895,193 @@ function offsetPolygonPoints(points, offsetDistance, options = {}) {
   return offsetPoints;
 }
 
+function buildCornerArtifacts(points, offsets, scale, zPosition, controlInfo, isClosedPath, materials) {
+  if (!Array.isArray(points) || points.length < 2 || !materials) {
+    return [];
+  }
+
+  const toolRadius = DEFAULT_TOOL_RADIUS;
+  if (!Number.isFinite(toolRadius) || toolRadius <= 0) {
+    return [];
+  }
+
+  const artifacts = [];
+  const totalPoints = points.length;
+  const startIndex = isClosedPath ? 0 : 1;
+  const endIndex = isClosedPath ? totalPoints : totalPoints - 1;
+
+  const radiusMode = controlInfo?.hasOvercut ? "relief" : "radius";
+
+  if (radiusMode === "radius") {
+    const centers = offsetPolygonPoints(points, -toolRadius, { closed: isClosedPath });
+    if (!Array.isArray(centers) || centers.length !== totalPoints) {
+      return artifacts;
+    }
+
+    const arcPoints = [];
+
+    for (let i = startIndex; i < endIndex; i += 1) {
+      const prevIndex = (i - 1 + totalPoints) % totalPoints;
+      const nextIndex = (i + 1) % totalPoints;
+
+      if (!isClosedPath && (i <= 0 || i >= totalPoints - 1)) {
+        continue;
+      }
+
+      const prev = points[prevIndex];
+      const curr = points[i];
+      const next = points[nextIndex];
+      const center = centers[i];
+
+      if (!isFinitePoint(prev) || !isFinitePoint(curr) || !isFinitePoint(next) || !isFinitePoint(center)) {
+        continue;
+      }
+
+      const incoming = new THREE.Vector2(curr.x - prev.x, curr.y - prev.y);
+      const outgoing = new THREE.Vector2(next.x - curr.x, next.y - curr.y);
+      const lenIn = incoming.length();
+      const lenOut = outgoing.length();
+      if (lenIn < 1e-3 || lenOut < 1e-3) {
+        continue;
+      }
+
+      const incomingDir = incoming.clone().normalize();
+      const outgoingDir = outgoing.clone().normalize();
+
+      const tangentInDistance = incomingDir.dot(new THREE.Vector2(center.x - prev.x, center.y - prev.y));
+      const tangentOutDistance = outgoingDir.dot(new THREE.Vector2(center.x - curr.x, center.y - curr.y));
+
+      if (!Number.isFinite(tangentInDistance) || !Number.isFinite(tangentOutDistance)) {
+        continue;
+      }
+
+      const epsilon = 1e-4;
+      if (
+        tangentInDistance <= epsilon ||
+        tangentInDistance >= lenIn - epsilon ||
+        tangentOutDistance <= epsilon ||
+        tangentOutDistance >= lenOut - epsilon
+      ) {
+        continue;
+      }
+
+      const tangentIn = new THREE.Vector2(prev.x, prev.y).add(incomingDir.clone().multiplyScalar(tangentInDistance));
+      const tangentOut = new THREE.Vector2(curr.x, curr.y).add(outgoingDir.clone().multiplyScalar(tangentOutDistance));
+
+      const startVec = new THREE.Vector2(tangentIn.x - center.x, tangentIn.y - center.y);
+      const endVec = new THREE.Vector2(tangentOut.x - center.x, tangentOut.y - center.y);
+      const startLen = startVec.length();
+      const endLen = endVec.length();
+      if (startLen < 1e-3 || endLen < 1e-3) {
+        continue;
+      }
+
+      const startAngle = Math.atan2(startVec.y, startVec.x);
+      const endAngle = Math.atan2(endVec.y, endVec.x);
+      let sweep = endAngle - startAngle;
+      const cross = startVec.x * endVec.y - startVec.y * endVec.x;
+      if (cross >= 0) {
+        if (sweep < 0) {
+          sweep += Math.PI * 2;
+        }
+      } else if (cross < 0) {
+        if (sweep > 0) {
+          sweep -= Math.PI * 2;
+        }
+      }
+
+      if (!Number.isFinite(sweep) || Math.abs(sweep) < 1e-3) {
+        continue;
+      }
+
+      const steps = Math.max(4, Math.ceil(Math.abs(sweep) / (Math.PI / 18)));
+      for (let step = 0; step < steps; step += 1) {
+        const angle1 = startAngle + (sweep * step) / steps;
+        const angle2 = startAngle + (sweep * (step + 1)) / steps;
+        const arcPoint1 = {
+          x: center.x + Math.cos(angle1) * toolRadius,
+          y: center.y + Math.sin(angle1) * toolRadius
+        };
+        const arcPoint2 = {
+          x: center.x + Math.cos(angle2) * toolRadius,
+          y: center.y + Math.sin(angle2) * toolRadius
+        };
+
+        const world1 = convertPointToWorld(arcPoint1, offsets, scale);
+        const world2 = convertPointToWorld(arcPoint2, offsets, scale);
+        if (!world1 || !world2 || world1.distanceTo(world2) < 1e-6) {
+          continue;
+        }
+
+        arcPoints.push(new THREE.Vector3(world1.x, world1.y, zPosition));
+        arcPoints.push(new THREE.Vector3(world2.x, world2.y, zPosition));
+      }
+    }
+
+    if (arcPoints.length > 0 && materials.pafCornerRadiusLine) {
+      const geometry = new THREE.BufferGeometry().setFromPoints(arcPoints);
+      const arcLine = new THREE.LineSegments(geometry, materials.pafCornerRadiusLine);
+      arcLine.userData = { cornerArtifact: "radius" };
+      artifacts.push(arcLine);
+    }
+  } else {
+    const reliefPoints = [];
+
+    for (let i = startIndex; i < endIndex; i += 1) {
+      const prevIndex = (i - 1 + totalPoints) % totalPoints;
+      const nextIndex = (i + 1) % totalPoints;
+
+      if (!isClosedPath && (i <= 0 || i >= totalPoints)) {
+        continue;
+      }
+
+      const prev = points[prevIndex];
+      const curr = points[i];
+      const next = points[nextIndex];
+      if (!isFinitePoint(prev) || !isFinitePoint(curr) || !isFinitePoint(next)) {
+        continue;
+      }
+
+      const incoming = new THREE.Vector2(curr.x - prev.x, curr.y - prev.y);
+      const outgoing = new THREE.Vector2(next.x - curr.x, next.y - curr.y);
+      const lenIn = incoming.length();
+      const lenOut = outgoing.length();
+      if (lenIn < 1e-3 || lenOut < 1e-3) {
+        continue;
+      }
+
+      const turnMagnitude = Math.abs(incoming.x * outgoing.y - incoming.y * outgoing.x);
+      if (turnMagnitude < 1e-4) {
+        continue;
+      }
+
+      const incomingDir = incoming.clone().normalize();
+      const extensionPoint = {
+        x: curr.x + incomingDir.x * toolRadius,
+        y: curr.y + incomingDir.y * toolRadius
+      };
+
+      const worldStart = convertPointToWorld(curr, offsets, scale);
+      const worldEnd = convertPointToWorld(extensionPoint, offsets, scale);
+      if (!worldStart || !worldEnd || worldStart.distanceTo(worldEnd) < 1e-6) {
+        continue;
+      }
+
+      reliefPoints.push(new THREE.Vector3(worldStart.x, worldStart.y, zPosition));
+      reliefPoints.push(new THREE.Vector3(worldEnd.x, worldEnd.y, zPosition));
+    }
+
+    if (reliefPoints.length > 0 && materials.pafCornerReliefLine) {
+      const geometry = new THREE.BufferGeometry().setFromPoints(reliefPoints);
+      const reliefLine = new THREE.LineSegments(geometry, materials.pafCornerReliefLine);
+      reliefLine.userData = { cornerArtifact: "relief" };
+      artifacts.push(reliefLine);
+    }
+  }
+
+  return artifacts;
+}
+
 function createPafSegmentMesh(segment, routing, context) {
   const {
     materials,
@@ -1207,6 +1394,16 @@ function createPafPolygonMesh(segment, routing, context) {
 
   const line = new THREE.LineSegments(geometry, baseMaterial);
 
+  const cornerArtifacts = buildCornerArtifacts(
+    deduped,
+    offsets,
+    scale,
+    lineZ,
+    controlInfo,
+    isClosedPath,
+    materials
+  );
+
   // For dashed lines, we need to compute line distances
   if (isUndercut) {
     line.computeLineDistances();
@@ -1263,8 +1460,17 @@ function createPafPolygonMesh(segment, routing, context) {
       if (expandedPoints3D.length > 0) {
         const expandedGeometry = new THREE.BufferGeometry().setFromPoints(expandedPoints3D);
         const expandedLine = new THREE.LineSegments(expandedGeometry, materials.pafOvercuttingLine);
+        expandedLine.userData = { overlayRole: "overcutOutline" };
         group.add(expandedLine);
       }
+    }
+
+    if (cornerArtifacts.length > 0) {
+      cornerArtifacts.forEach(artifact => {
+        if (artifact) {
+          group.add(artifact);
+        }
+      });
     }
 
     group.position.set(0, 0, 0);
@@ -1273,13 +1479,49 @@ function createPafPolygonMesh(segment, routing, context) {
     group.userData = { ...line.userData };
     group.userData.setHoverState = state => {
       line.material = state ? highlightMaterial : baseMaterial;
-      // Also update overcutting material if it exists
-      const overcutLine = group.children.find(child =>
-        child.material === materials.pafOvercuttingLine ||
-        child.material === highlightMaterials.pafOvercuttingLine
-      );
-      if (overcutLine) {
-        overcutLine.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
+      for (const child of group.children) {
+        if (child.userData?.overlayRole === "overcutOutline") {
+          if (materials.pafOvercuttingLine && highlightMaterials.pafOvercuttingLine) {
+            child.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
+          }
+        } else if (child.userData?.cornerArtifact === "radius") {
+          if (materials.pafCornerRadiusLine && highlightMaterials.pafCornerRadiusLine) {
+            child.material = state ? highlightMaterials.pafCornerRadiusLine : materials.pafCornerRadiusLine;
+          }
+        } else if (child.userData?.cornerArtifact === "relief") {
+          if (materials.pafCornerReliefLine && highlightMaterials.pafCornerReliefLine) {
+            child.material = state ? highlightMaterials.pafCornerReliefLine : materials.pafCornerReliefLine;
+          }
+        }
+      }
+    };
+
+    return group;
+  }
+
+  if (cornerArtifacts.length > 0) {
+    const group = new THREE.Group();
+    group.add(line);
+    cornerArtifacts.forEach(artifact => {
+      if (artifact) {
+        group.add(artifact);
+      }
+    });
+    group.position.set(0, 0, 0);
+
+    group.userData = { ...line.userData };
+    group.userData.setHoverState = state => {
+      line.material = state ? highlightMaterial : baseMaterial;
+      for (const child of group.children) {
+        if (child.userData?.cornerArtifact === "radius") {
+          if (materials.pafCornerRadiusLine && highlightMaterials.pafCornerRadiusLine) {
+            child.material = state ? highlightMaterials.pafCornerRadiusLine : materials.pafCornerRadiusLine;
+          }
+        } else if (child.userData?.cornerArtifact === "relief") {
+          if (materials.pafCornerReliefLine && highlightMaterials.pafCornerReliefLine) {
+            child.material = state ? highlightMaterials.pafCornerReliefLine : materials.pafCornerReliefLine;
+          }
+        }
       }
     };
 

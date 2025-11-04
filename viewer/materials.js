@@ -98,6 +98,18 @@ export function createMaterialLibrary() {
       linewidth: 2,
       transparent: true,
       opacity: 0.7
+    }),
+    pafCornerRadiusLine: new THREE.LineBasicMaterial({
+      color: 0x4caf50,
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.8
+    }),
+    pafCornerReliefLine: new THREE.LineBasicMaterial({
+      color: 0xf44336,
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.85
     })
   };
 
@@ -113,7 +125,9 @@ export function createMaterialLibrary() {
     pafOvercutting: materials.pafOvercutting.clone(),
     pafRoutingLine: materials.pafRoutingLine.clone(),
     pafRoutingLineDashed: materials.pafRoutingLineDashed.clone(),
-    pafOvercuttingLine: materials.pafOvercuttingLine.clone()
+    pafOvercuttingLine: materials.pafOvercuttingLine.clone(),
+    pafCornerRadiusLine: materials.pafCornerRadiusLine.clone(),
+    pafCornerReliefLine: materials.pafCornerReliefLine.clone()
   };
 
   highlightMaterials.plate.opacity = 0.8;
@@ -130,6 +144,8 @@ export function createMaterialLibrary() {
   highlightMaterials.pafRoutingLine.opacity = 1.0;
   highlightMaterials.pafRoutingLineDashed.opacity = 1.0;
   highlightMaterials.pafOvercuttingLine.opacity = 0.8;
+  highlightMaterials.pafCornerRadiusLine.opacity = 1.0;
+  highlightMaterials.pafCornerReliefLine.opacity = 1.0;
 
   const nailMarkerGeometry = createNailMarkerGeometry();
 
