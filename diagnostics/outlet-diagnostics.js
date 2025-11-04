@@ -81,13 +81,16 @@ export function runOutletDiagnostics(model) {
         .map(i => `#${i + 1}`)
         .join(", ");
 
+      const replacement = buildReplacementData(polygon, legacyOutlet);
+
       results.checks[0].results.push({
         id: `PAF Routings ${routingIds}`,
         routing: polygon.routing,
         passed: false,
         message: legacyOutlet.message,
         details: legacyOutlet.details,
-        position: legacyOutlet.position
+        position: legacyOutlet.position,
+        replacement
       });
     }
   });
@@ -116,6 +119,11 @@ function detectLegacyOutletPattern(polygon, allCircles) {
   const EXPECTED_RADIUS = 34; // mm
   const EXPECTED_BOX_DIM = 44; // mm
   const TOLERANCE = 1; // mm tolerance
+  const boxSegment = polygon.segment;
+
+  if (!boxSegment) {
+    return { isLegacy: false };
+  }
 
   // Extract box boundaries
   const boxCorners = polygon.points.map(p => ({ x: p.x, y: p.y }));
@@ -232,8 +240,30 @@ function detectLegacyOutletPattern(polygon, allCircles) {
   // Mark circles as used
   matchedCircles.forEach(c => c.used = true);
 
-  // Determine orientation based on which dimension is 44mm
-  const orientationType = Math.abs(boxWidth - EXPECTED_BOX_DIM) <= TOLERANCE ? "vertical" : "horizontal";
+  // Determine orientation based on circle alignment (fallback to dimension check)
+  let orientationType = Math.abs(boxWidth - EXPECTED_BOX_DIM) <= TOLERANCE ? "vertical" : "horizontal";
+  if (matchedCircles.length === 2) {
+    const [circleA, circleB] = matchedCircles;
+    const dx = Math.abs(circleA.position.x - circleB.position.x);
+    const dy = Math.abs(circleA.position.y - circleB.position.y);
+    if (dy <= TOLERANCE) {
+      orientationType = "horizontal";
+    } else if (dx <= TOLERANCE) {
+      orientationType = "vertical";
+    }
+  }
+
+  const firstSourceEntry = Array.isArray(boxSegment.source)
+    ? boxSegment.source.find(entry => Array.isArray(entry?.numbers) && entry.numbers.length >= 6)
+    : null;
+  const sourceNumbers = firstSourceEntry?.numbers ?? [];
+  const depthParam = Number.isFinite(sourceNumbers[2])
+    ? sourceNumbers[2]
+    : (Number.isFinite(boxSegment.depthRaw) ? boxSegment.depthRaw : (Number.isFinite(boxSegment.depth) ? -Math.abs(boxSegment.depth) : null));
+  const orientationParam = Number.isFinite(sourceNumbers[4])
+    ? sourceNumbers[4]
+    : (Number.isFinite(boxSegment.orientation) ? boxSegment.orientation : 0);
+  const trailingParam = Number.isFinite(sourceNumbers[5]) ? sourceNumbers[5] : null;
 
   // Calculate center position for zoom functionality
   const centerX = (boxMinX + boxMaxX) / 2;
@@ -255,7 +285,51 @@ function detectLegacyOutletPattern(polygon, allCircles) {
     position: {
       x: centerX,
       y: centerY
+    },
+    orientationType,
+    metadata: {
+      center: { x: centerX, y: centerY },
+      depth: Number.isFinite(depthParam) ? depthParam : null,
+      orientationValue: Number.isFinite(orientationParam) ? orientationParam : 0,
+      zValue: Number.isFinite(trailingParam) ? trailingParam : null,
+      boxWidth,
+      boxHeight
     }
+  };
+}
+
+function buildReplacementData(polygon, legacyOutlet) {
+  if (!polygon || !legacyOutlet || !legacyOutlet.metadata) {
+    return null;
+  }
+
+  const routing = polygon.routing;
+  if (!routing) {
+    return null;
+  }
+
+  const boxId = typeof routing.__editorId === "number" ? routing.__editorId : null;
+  const circleIds = (legacyOutlet.matchedCircles ?? [])
+    .map(circle => circle?.routing?.__editorId)
+    .filter(id => typeof id === "number");
+  const headerSource = Array.isArray(routing.source) ? [...routing.source] : [];
+
+  return {
+    id: boxId !== null ? `legacyOutlet-${boxId}` : null,
+    orientation: legacyOutlet.orientationType,
+    center: { x: legacyOutlet.position.x, y: legacyOutlet.position.y },
+    depth: legacyOutlet.metadata.depth,
+    zValue: legacyOutlet.metadata.zValue,
+    orientationValue: legacyOutlet.metadata.orientationValue,
+    headerSource,
+    tool: Number.isFinite(routing.tool) ? routing.tool : null,
+    face: Number.isFinite(routing.face) ? routing.face : null,
+    passes: Number.isFinite(routing.passes) ? routing.passes : null,
+    layer: routing.layer ?? null,
+    boxRoutingEditorId: boxId,
+    circleRoutingEditorIds: circleIds,
+    command: routing.__command ?? "PAF",
+    body: routing.__body ?? routing.body ?? ""
   };
 }
 

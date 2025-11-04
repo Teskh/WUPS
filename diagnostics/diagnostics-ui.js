@@ -10,6 +10,7 @@ import {
   getAvailableDiagnostics,
   saveDiagnosticResults
 } from "./diagnostic-runner.js";
+import { createModernOutletRouting } from "./outlet-modernizer.js";
 
 let currentModel = null;
 let diagnosticsPanel = null;
@@ -345,12 +346,24 @@ function createCheckSection(check) {
       zoomButton = `<button class="zoom-to-outlet" data-x="${result.position.x}" data-y="${result.position.y}" title="Zoom to this location">🔍</button>`;
     }
 
+    let replaceButton = '';
+    if (!result.passed && result.replacement) {
+      const isHorizontal = result.replacement.orientation === "horizontal";
+      const disabledAttr = isHorizontal ? "" : " disabled";
+      const title = isHorizontal
+        ? "Replace legacy outlet with modern routing"
+        : "Replacement available for horizontal outlets only";
+      replaceButton = `<button class="replace-legacy-outlet"${disabledAttr} type="button" title="${title}">Replace</button>`;
+    }
+
+    const actionButtons = `${zoomButton}${replaceButton}`;
+
     item.innerHTML = `
       <div class="result-summary">
         <span class="${statusClass}">${checkbox}</span>
         <strong>${result.id}</strong>
         <span class="result-message">${result.message}</span>
-        ${zoomButton}
+        ${actionButtons}
       </div>
     `;
 
@@ -403,6 +416,17 @@ function createCheckSection(check) {
       });
     }
 
+    const replaceOutletBtn = item.querySelector(".replace-legacy-outlet");
+    if (replaceOutletBtn) {
+      replaceOutletBtn.addEventListener("click", (e) => {
+        if (replaceOutletBtn.disabled) {
+          return;
+        }
+        e.stopPropagation();
+        handleReplaceOutlet(result);
+      });
+    }
+
     resultsList.appendChild(item);
   });
 
@@ -446,6 +470,205 @@ function zoomToPosition(x, y) {
         detail: { x, y }
       })
     );
+  }
+}
+
+function handleReplaceOutlet(result) {
+  if (!currentModel) {
+    alert("No model loaded. Please load a WUP file first.");
+    return;
+  }
+
+  const replacement = result?.replacement;
+  if (!replacement) {
+    alert("Replacement data is not available for this outlet.");
+    return;
+  }
+
+  if (replacement.orientation !== "horizontal") {
+    alert("Outlet replacement is currently supported for horizontal outlets only.");
+    return;
+  }
+
+  try {
+    applyOutletReplacement(currentModel, replacement);
+    refreshModelInViewer(currentModel);
+    const updatedResult = runDiagnostic("outlet", currentModel);
+    displaySingleResult(updatedResult);
+
+    const saveButton = document.getElementById("saveDiagnostics");
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.dataset.results = JSON.stringify(updatedResult);
+    }
+  } catch (err) {
+    console.error("Failed to replace legacy outlet:", err);
+    alert(`Failed to replace outlet: ${err.message}`);
+  }
+}
+
+function applyOutletReplacement(model, replacement) {
+  if (!model || !Array.isArray(model.pafRoutings)) {
+    throw new Error("Model does not contain any PAF routings.");
+  }
+
+  const boxId = replacement.boxRoutingEditorId;
+  if (typeof boxId !== "number") {
+    throw new Error("Legacy outlet routing identifier is missing.");
+  }
+
+  const targetIndex = model.pafRoutings.findIndex(
+    routing => routing && typeof routing.__editorId === "number" && routing.__editorId === boxId
+  );
+
+  if (targetIndex === -1) {
+    throw new Error("Legacy outlet routing could not be located in the current model.");
+  }
+
+  const existingRouting = model.pafRoutings[targetIndex];
+  const legacyParams = extractLegacyRoutingParams(existingRouting);
+  const depthValue = Number.isFinite(replacement.depth) ? replacement.depth : legacyParams.depth;
+  const orientationValue = Number.isFinite(replacement.orientationValue)
+    ? replacement.orientationValue
+    : legacyParams.orientation;
+  const zValue = Number.isFinite(replacement.zValue) ? replacement.zValue : legacyParams.zValue;
+  const headerSource = Array.isArray(replacement.headerSource) && replacement.headerSource.length > 0
+    ? replacement.headerSource.filter(num => Number.isFinite(num))
+    : (Array.isArray(existingRouting.source) ? existingRouting.source.filter(num => Number.isFinite(num)) : []);
+
+  const newRouting = createModernOutletRouting({
+    center: replacement.center,
+    depth: depthValue,
+    zValue,
+    orientationValue,
+    headerSource,
+    tool: replacement.tool ?? existingRouting.tool ?? null,
+    face: replacement.face ?? existingRouting.face ?? null,
+    passes: replacement.passes ?? existingRouting.passes ?? null,
+    layer: replacement.layer ?? existingRouting.layer ?? null,
+    command: replacement.command ?? existingRouting.__command ?? "PAF",
+    body: replacement.body ?? existingRouting.body ?? ""
+  });
+
+  newRouting.__editorId = existingRouting.__editorId;
+  newRouting.__command = existingRouting.__command ?? replacement.command ?? "PAF";
+  newRouting.__body = existingRouting.__body ?? replacement.body ?? "";
+  newRouting.body = replacement.body ?? existingRouting.body ?? "";
+  if (Array.isArray(existingRouting.__statementIndices)) {
+    newRouting.__statementIndices = [...existingRouting.__statementIndices];
+  }
+  if (typeof existingRouting.__statementIndex === "number") {
+    newRouting.__statementIndex = existingRouting.__statementIndex;
+  }
+
+  model.pafRoutings[targetIndex] = newRouting;
+
+  const circleIds = new Set(
+    (replacement.circleRoutingEditorIds ?? []).filter(id => typeof id === "number")
+  );
+  if (circleIds.size > 0) {
+    model.pafRoutings = model.pafRoutings.filter(routing => {
+      const id = routing?.__editorId;
+      if (typeof id !== "number") {
+        return true;
+      }
+      return !circleIds.has(id);
+    });
+  }
+
+  ensureModelBounds(model);
+  extendBoundsWithRouting(model.bounds, newRouting);
+  updateModelViewDimensions(model);
+
+  return model;
+}
+
+function extractLegacyRoutingParams(routing) {
+  const segment = routing?.segments?.[0];
+  const firstEntry = Array.isArray(segment?.source) ? segment.source.find(entry => Array.isArray(entry?.numbers)) : null;
+  const numbers = firstEntry?.numbers ?? [];
+  const depth = numbers.length >= 3 && Number.isFinite(numbers[2])
+    ? numbers[2]
+    : (Number.isFinite(segment?.depthRaw) ? segment.depthRaw : null);
+  const orientation = numbers.length >= 5 && Number.isFinite(numbers[4])
+    ? numbers[4]
+    : (Number.isFinite(segment?.orientation) ? segment.orientation : 0);
+  const zValue = numbers.length >= 6 && Number.isFinite(numbers[5]) ? numbers[5] : null;
+  return {
+    depth: Number.isFinite(depth) ? depth : -13,
+    orientation: Number.isFinite(orientation) ? orientation : 0,
+    zValue
+  };
+}
+
+function ensureModelBounds(model) {
+  if (!model.bounds) {
+    model.bounds = {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY
+    };
+  }
+}
+
+function extendBoundsWithRouting(bounds, routing) {
+  if (!bounds || !routing) {
+    return;
+  }
+
+  const segments = routing.segments ?? [];
+  for (const segment of segments) {
+    if (Array.isArray(segment?.points)) {
+      for (const point of segment.points) {
+        if (!point) {
+          continue;
+        }
+        const { x, y } = point;
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          bounds.minX = Math.min(bounds.minX, x);
+          bounds.minY = Math.min(bounds.minY, y);
+          bounds.maxX = Math.max(bounds.maxX, x);
+          bounds.maxY = Math.max(bounds.maxY, y);
+        }
+      }
+    }
+  }
+}
+
+function updateModelViewDimensions(model) {
+  if (!model) {
+    return;
+  }
+  if (!model.view) {
+    model.view = {};
+  }
+  if (model.wall && Number.isFinite(model.wall.width) && Number.isFinite(model.wall.height)) {
+    model.view.width = model.wall.width;
+    model.view.height = model.wall.height;
+    return;
+  }
+  if (model.bounds) {
+    model.view.width = model.bounds.maxX - model.bounds.minX;
+    model.view.height = model.bounds.maxY - model.bounds.minY;
+  }
+}
+
+function refreshModelInViewer(model) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const viewer = window.__frameViewer;
+  if (viewer?.updateModel) {
+    const clone = typeof structuredClone === "function"
+      ? structuredClone(model)
+      : JSON.parse(JSON.stringify(model));
+    viewer.updateModel(clone, { maintainCamera: true });
+  }
+  if (window.__lastWupModel) {
+    window.__lastWupModel.model = model;
+  } else {
+    window.__lastWupModel = { model, label: "model.wup" };
   }
 }
 
