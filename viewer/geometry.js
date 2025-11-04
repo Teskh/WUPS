@@ -692,6 +692,103 @@ function resolvePafSegmentDepthMm(segment, wallThickness) {
   return Math.min(12, wallThickness);
 }
 
+function computePolygonWindingOrder(points) {
+  // Use the shoelace formula to determine polygon winding order
+  // Positive area = counter-clockwise, Negative area = clockwise
+  if (!Array.isArray(points) || points.length < 3) {
+    return 0;
+  }
+
+  let area = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const curr = points[i];
+    const next = points[(i + 1) % n];
+    area += (next.x - curr.x) * (next.y + curr.y);
+  }
+
+  return Math.sign(area);
+}
+
+function offsetPolygonPoints(points, offsetDistance) {
+  if (!Array.isArray(points) || points.length < 3 || !Number.isFinite(offsetDistance)) {
+    return points;
+  }
+
+  // Detect polygon winding order
+  // For counter-clockwise polygons, positive offset = outward
+  // For clockwise polygons, positive offset = inward, so we need to negate it
+  const windingOrder = computePolygonWindingOrder(points);
+  const adjustedOffset = windingOrder < 0 ? -offsetDistance : offsetDistance;
+
+  const offsetPoints = [];
+  const n = points.length;
+
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i - 1 + n) % n];
+    const curr = points[i];
+    const next = points[(i + 1) % n];
+
+    // Calculate edge vectors
+    const v1x = curr.x - prev.x;
+    const v1y = curr.y - prev.y;
+    const v2x = next.x - curr.x;
+    const v2y = next.y - curr.y;
+
+    // Normalize edge vectors
+    const len1 = Math.sqrt(v1x * v1x + v1y * v1y);
+    const len2 = Math.sqrt(v2x * v2x + v2y * v2y);
+
+    if (len1 < 1e-6 || len2 < 1e-6) {
+      offsetPoints.push({ x: curr.x, y: curr.y });
+      continue;
+    }
+
+    const n1x = v1x / len1;
+    const n1y = v1y / len1;
+    const n2x = v2x / len2;
+    const n2y = v2y / len2;
+
+    // Calculate perpendicular normals (outward for CCW polygons)
+    const perp1x = -n1y;
+    const perp1y = n1x;
+    const perp2x = -n2y;
+    const perp2y = n2x;
+
+    // Calculate bisector (average of perpendiculars)
+    let bisectorX = perp1x + perp2x;
+    let bisectorY = perp1y + perp2y;
+    const bisectorLen = Math.sqrt(bisectorX * bisectorX + bisectorY * bisectorY);
+
+    if (bisectorLen < 1e-6) {
+      // Edges are parallel, use perpendicular
+      offsetPoints.push({
+        x: curr.x + perp1x * adjustedOffset,
+        y: curr.y + perp1y * adjustedOffset
+      });
+      continue;
+    }
+
+    bisectorX /= bisectorLen;
+    bisectorY /= bisectorLen;
+
+    // Calculate the offset distance along the bisector
+    // The angle between the bisector and the perpendicular determines the actual distance
+    const dotProduct = bisectorX * perp1x + bisectorY * perp1y;
+    const actualOffset = dotProduct > 1e-6 ? adjustedOffset / dotProduct : adjustedOffset;
+
+    // Clamp excessive offsets for very sharp angles
+    const clampedOffset = Math.min(Math.abs(actualOffset), Math.abs(adjustedOffset) * 10) * Math.sign(actualOffset);
+
+    offsetPoints.push({
+      x: curr.x + bisectorX * clampedOffset,
+      y: curr.y + bisectorY * clampedOffset
+    });
+  }
+
+  return offsetPoints;
+}
+
 function createPafSegmentMesh(segment, routing, context) {
   const {
     materials,
@@ -784,6 +881,40 @@ function createPafSegmentMesh(segment, routing, context) {
   mesh.userData.setHoverState = state => {
     mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
   };
+
+  // Create overcutting visualization if applicable
+  if (adjustment?.applied && adjustment.expansion > 0) {
+    const group = new THREE.Group();
+    group.add(mesh);
+
+    const expansionMm = adjustment.expansion / 2; // expansion per side
+    const overcutRadiusMm = radiusMm + expansionMm;
+    const overcutRadiusWorld = overcutRadiusMm * scale;
+
+    // Create a thin outline cylinder at the same depth
+    const overcutGeometry = new THREE.CylinderGeometry(
+      overcutRadiusWorld,
+      overcutRadiusWorld,
+      depthWorld,
+      32
+    );
+    overcutGeometry.rotateX(Math.PI / 2);
+    const overcutMesh = new THREE.Mesh(overcutGeometry, materials.pafOvercutting);
+    overcutMesh.position.set(worldPoint.x, worldPoint.y, centerZMm * scale);
+
+    group.add(overcutMesh);
+    group.position.set(0, 0, 0);
+
+    // Transfer userData to group
+    group.userData = { ...mesh.userData };
+    group.userData.setHoverState = state => {
+      mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+      overcutMesh.material = state ? highlightMaterials.pafOvercutting : materials.pafOvercutting;
+    };
+
+    return group;
+  }
+
   return mesh;
 }
 
@@ -896,6 +1027,76 @@ function createPafPolygonMesh(segment, routing, context) {
   mesh.userData.setHoverState = state => {
     mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
   };
+
+  // Create overcutting visualization if applicable
+  if (adjustment?.applied && adjustment.expansion > 0) {
+    const group = new THREE.Group();
+    group.add(mesh);
+
+    const expansionMm = adjustment.expansion / 2; // expansion per side
+    const offsetPoints = offsetPolygonPoints(deduped, expansionMm);
+
+    if (offsetPoints && offsetPoints.length >= 3) {
+      const offsetWorldPoints = offsetPoints.map(point => convertPointToWorld(point, offsets, scale));
+      const offsetCentroid = offsetWorldPoints
+        .reduce((acc, pt) => acc.add(pt.clone()), new THREE.Vector2())
+        .multiplyScalar(1 / offsetWorldPoints.length);
+
+      const offsetShape = new THREE.Shape();
+
+      if (pathSegments && pathSegments.length > 0) {
+        // For arc-based paths, we need to offset the arcs as well
+        // For simplicity, use the offset polygon points
+        offsetWorldPoints.forEach((pt, index) => {
+          const relativeX = pt.x - offsetCentroid.x;
+          const relativeY = pt.y - offsetCentroid.y;
+          if (index === 0) {
+            offsetShape.moveTo(relativeX, relativeY);
+          } else {
+            offsetShape.lineTo(relativeX, relativeY);
+          }
+        });
+        offsetShape.closePath();
+      } else {
+        offsetWorldPoints.forEach((pt, index) => {
+          const relativeX = pt.x - offsetCentroid.x;
+          const relativeY = pt.y - offsetCentroid.y;
+          if (index === 0) {
+            offsetShape.moveTo(relativeX, relativeY);
+          } else {
+            offsetShape.lineTo(relativeX, relativeY);
+          }
+        });
+        offsetShape.closePath();
+      }
+
+      const overcutGeometry = new THREE.ExtrudeGeometry(offsetShape, {
+        depth: depthWorld,
+        bevelEnabled: false
+      });
+      overcutGeometry.translate(0, 0, -depthWorld / 2);
+
+      const overcutMesh = new THREE.Mesh(overcutGeometry, materials.pafOvercutting);
+      overcutMesh.position.set(offsetCentroid.x, offsetCentroid.y, centerZMm * scale);
+
+      group.add(overcutMesh);
+    }
+
+    group.position.set(0, 0, 0);
+
+    // Transfer userData to group
+    group.userData = { ...mesh.userData };
+    group.userData.setHoverState = state => {
+      mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+      // Also update overcutting material if it exists
+      const overcutMesh = group.children.find(child => child.material === materials.pafOvercutting || child.material === highlightMaterials.pafOvercutting);
+      if (overcutMesh) {
+        overcutMesh.material = state ? highlightMaterials.pafOvercutting : materials.pafOvercutting;
+      }
+    };
+
+    return group;
+  }
 
   return mesh;
 }

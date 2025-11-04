@@ -69,6 +69,15 @@ export function createMaterialLibrary() {
       roughness: 0.48,
       transparent: true,
       opacity: 0.78
+    }),
+    pafOvercutting: new THREE.MeshStandardMaterial({
+      color: 0xff9800,
+      metalness: 0.08,
+      roughness: 0.6,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthWrite: false
     })
   };
 
@@ -80,7 +89,8 @@ export function createMaterialLibrary() {
     nailRow: materials.nailRow.clone(),
     boyOperation: materials.boyOperation.clone(),
     boyArrow: materials.boyArrow.clone(),
-    pafRouting: materials.pafRouting.clone()
+    pafRouting: materials.pafRouting.clone(),
+    pafOvercutting: materials.pafOvercutting.clone()
   };
 
   highlightMaterials.plate.opacity = 0.8;
