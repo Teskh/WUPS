@@ -7,6 +7,7 @@ import { CommandRegistry } from "./commands/command-registry.js";
 import { OverlayManager } from "./overlays/overlay-manager.js";
 import { Keymap } from "./ui/keymap.js";
 import { createEditControls } from "./ui/edit-controls.js";
+import { createPafParameterMenu } from "./ui/paf-parameter-menu.js";
 import { createHud } from "./ui/hud.js";
 import { DeleteCommand } from "./commands/delete.js";
 import { TranslateCommand } from "./commands/move-translate.js";
@@ -191,6 +192,7 @@ export class EditorController {
     this.originalText = null;
     this.hud = typeof document !== "undefined" ? createHud() : null;
     this.controls = null;
+    this.pafMenu = null;
     this.activeCommand = null;
     this.workingStatements = [];
 
@@ -199,6 +201,9 @@ export class EditorController {
       this.updateSelectionHud(selection);
       if (this.controls?.updateSelectionCount) {
         this.controls.updateSelectionCount(selection.length);
+      }
+      if (this.pafMenu?.updateSelection) {
+        this.pafMenu.updateSelection(selection);
       }
     });
 
@@ -228,6 +233,7 @@ export class EditorController {
         selection: this.selection,
         controller: this
       });
+      this.pafMenu = createPafParameterMenu({ container });
     }
 
     const initialModel = viewer.getCurrentModel?.();
@@ -245,6 +251,9 @@ export class EditorController {
     }
     if (this.controls?.cleanup) {
       this.controls.cleanup();
+    }
+    if (this.pafMenu?.cleanup) {
+      this.pafMenu.cleanup();
     }
     if (this.hud?.destroy) {
       this.hud.destroy();
@@ -316,6 +325,9 @@ export class EditorController {
     this.showHudMessage("Edit mode disabled.");
     if (this.controls?.setEnabled) {
       this.controls.setEnabled(false);
+    }
+    if (this.pafMenu?.updateSelection) {
+      this.pafMenu.updateSelection([]);
     }
   }
 

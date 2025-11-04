@@ -1,3 +1,11 @@
+import {
+  computeCutoutFootprint,
+  DEFAULT_TOOL_RADIUS,
+  extractControlCode,
+  parseControlCode,
+  resolveFootprintAdjustment
+} from "../utils/paf-control.js";
+
 function formatNumber(value, digits = 0) {
   return Number.isFinite(value) ? value.toFixed(digits) : "?";
 }
@@ -170,13 +178,19 @@ export function formatTooltipContent(object) {
       }
       const toolParts = [];
       if (Number.isFinite(routing.tool)) {
-        toolParts.push(`tool ${routing.tool}`);
+        toolParts.push(`ref ${routing.tool}`);
       }
       if (Number.isFinite(routing.face)) {
         toolParts.push(`face ${routing.face}`);
       }
       if (Number.isFinite(routing.passes)) {
         toolParts.push(`${routing.passes} pass${routing.passes === 1 ? "" : "es"}`);
+      }
+      const controlCode = extractControlCode(segment);
+      const controlInfo = parseControlCode(controlCode);
+      const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
+      if (Number.isFinite(controlCode)) {
+        toolParts.push(`code ${controlCode}`);
       }
       const radiusMm = Number.isFinite(segment.radius)
         ? segment.radius
@@ -191,10 +205,38 @@ export function formatTooltipContent(object) {
           : null;
       const detailParts = [`@ (${formatNumber(basePoint.x)}, ${formatNumber(basePoint.y)})`];
       if (segment.kind === "polygon" && Array.isArray(segment.points) && segment.points.length >= 3) {
-        const footprint = computeFootprintSize(segment.points);
-        if (footprint && Number.isFinite(footprint.width) && Number.isFinite(footprint.height)) {
-          detailParts.push(`footprint ${formatNumber(footprint.width)} × ${formatNumber(footprint.height)} mm`);
+        const baseFootprint = computeFootprintSize(segment.points);
+        const effectiveFootprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS);
+        if (effectiveFootprint && Number.isFinite(effectiveFootprint.width) && Number.isFinite(effectiveFootprint.height)) {
+          const sizeText = `${formatNumber(effectiveFootprint.width)} × ${formatNumber(effectiveFootprint.height)} mm`;
+          const fragments = [`footprint ${sizeText}`];
+          if (baseFootprint && Number.isFinite(baseFootprint.width) && Number.isFinite(baseFootprint.height)) {
+            fragments.push(`path ${formatNumber(baseFootprint.width)} × ${formatNumber(baseFootprint.height)} mm`);
+          }
+          if (adjustment?.mode === "diameter") {
+            fragments.push(`+${formatNumber(DEFAULT_TOOL_RADIUS * 4)} mm total (16 mm side)`);
+          } else if (adjustment?.mode === "radius") {
+            fragments.push(`+${formatNumber(DEFAULT_TOOL_RADIUS * 2)} mm total (8 mm side)`);
+          }
+          detailParts.push(fragments.join(" · "));
         }
+      }
+      const footprintInfo = object.userData?.cutoutFootprint;
+      if (
+        (!segment || segment.kind !== "polygon") &&
+        footprintInfo &&
+        Number.isFinite(footprintInfo.width) &&
+        Number.isFinite(footprintInfo.height)
+      ) {
+        const fragments = [
+          `footprint ${formatNumber(footprintInfo.width)} × ${formatNumber(footprintInfo.height)} mm`
+        ];
+        if (adjustment?.mode === "diameter") {
+          fragments.push(`+${formatNumber(DEFAULT_TOOL_RADIUS * 4)} mm total (16 mm side)`);
+        } else if (adjustment?.mode === "radius") {
+          fragments.push(`+${formatNumber(DEFAULT_TOOL_RADIUS * 2)} mm total (8 mm side)`);
+        }
+        detailParts.push(fragments.join(" · "));
       }
       if (Number.isFinite(radiusMm)) {
         detailParts.push(`radius ${formatNumber(radiusMm)} mm`);

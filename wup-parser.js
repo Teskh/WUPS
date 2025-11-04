@@ -100,6 +100,10 @@ export function parseWup(wupText) {
         z: averageOrNull(currentPolygon.zSamples),
         source: currentPolygon.source.map(entry => cloneSourceEntry(entry))
       };
+      const controlCode = averageOrNull(currentPolygon.offsetSamples);
+      if (Number.isFinite(controlCode)) {
+        segment.controlCode = Math.round(controlCode);
+      }
       currentRouting.segments.push(segment);
     } else if (normalizedPoints.length >= 2) {
       const segment = {
@@ -113,6 +117,10 @@ export function parseWup(wupText) {
         z: averageOrNull(currentPolygon.zSamples),
         source: currentPolygon.source.map(entry => cloneSourceEntry(entry))
       };
+      const controlCode = averageOrNull(currentPolygon.offsetSamples);
+      if (Number.isFinite(controlCode)) {
+        segment.controlCode = Math.round(controlCode);
+      }
       currentRouting.segments.push(segment);
     }
 
@@ -253,6 +261,9 @@ export function parseWup(wupText) {
             extras: numbers.slice(6),
             source: numbers
           };
+          if (Number.isFinite(numbers[4])) {
+            segment.controlCode = Math.round(numbers[4]);
+          }
           currentRouting.segments.push(segment);
           if (Array.isArray(currentRouting.__statementIndices)) {
             currentRouting.__statementIndices.push(statementIndex);

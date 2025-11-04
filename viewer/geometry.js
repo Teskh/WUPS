@@ -1,4 +1,11 @@
 import * as THREE from "three";
+import {
+  computeCutoutFootprint,
+  DEFAULT_TOOL_RADIUS,
+  extractControlCode,
+  parseControlCode,
+  resolveFootprintAdjustment
+} from "../utils/paf-control.js";
 
 export function calculateScale(width, height) {
   const maxDim = Math.max(width, height);
@@ -753,6 +760,25 @@ function createPafSegmentMesh(segment, routing, context) {
   mesh.userData.segment = segment;
   mesh.userData.editorId = routing?.__editorId ?? null;
   mesh.userData.originalMaterial = materials.pafRouting;
+  const controlCode = extractControlCode(segment);
+  const controlInfo = parseControlCode(controlCode);
+  const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
+  mesh.userData.controlCode = controlCode;
+  mesh.userData.controlInfo = controlInfo;
+  mesh.userData.footprintAdjustment = adjustment;
+  mesh.userData.assumedToolRadius = adjustment?.applied ? DEFAULT_TOOL_RADIUS : null;
+  if (segment?.radius) {
+    const baseDiameter = Math.abs(segment.radius) * 2;
+    mesh.userData.cutoutFootprint = {
+      baseWidth: baseDiameter,
+      baseHeight: baseDiameter,
+      expansion: adjustment?.expansion ?? 0,
+      width: baseDiameter + (adjustment?.expansion ?? 0),
+      height: baseDiameter + (adjustment?.expansion ?? 0),
+      adjustment
+    };
+  }
+
   const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
   mesh.userData.layer = resolvedLayer;
   mesh.userData.setHoverState = state => {
@@ -854,6 +880,17 @@ function createPafPolygonMesh(segment, routing, context) {
   mesh.userData.segment = segment;
   mesh.userData.editorId = routing?.__editorId ?? null;
   mesh.userData.originalMaterial = materials.pafRouting;
+  const controlCode = extractControlCode(segment);
+  const controlInfo = parseControlCode(controlCode);
+  const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
+  mesh.userData.controlCode = controlCode;
+  mesh.userData.controlInfo = controlInfo;
+  mesh.userData.footprintAdjustment = adjustment;
+  mesh.userData.assumedToolRadius = adjustment?.applied ? DEFAULT_TOOL_RADIUS : null;
+  const footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS);
+  if (footprint) {
+    mesh.userData.cutoutFootprint = footprint;
+  }
   const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
   mesh.userData.layer = resolvedLayer;
   mesh.userData.setHoverState = state => {
