@@ -80,24 +80,24 @@ export function createMaterialLibrary() {
       depthWrite: false
     }),
     pafRoutingLine: new THREE.LineBasicMaterial({
-      color: 0x8e44ad,
-      linewidth: 3,
-      transparent: true,
-      opacity: 0.95
+      color: 0xc966ff,  // Brighter, more saturated purple
+      linewidth: 4,
+      transparent: false,
+      opacity: 1.0
     }),
     pafRoutingLineDashed: new THREE.LineDashedMaterial({
-      color: 0x8e44ad,
-      linewidth: 3,
+      color: 0xc966ff,  // Brighter, more saturated purple
+      linewidth: 4,
       dashSize: 10,
       gapSize: 5,
-      transparent: true,
-      opacity: 0.95
+      transparent: false,
+      opacity: 1.0
     }),
     pafOvercuttingLine: new THREE.LineBasicMaterial({
-      color: 0xff9800,
+      color: 0xffc107,  // Brighter amber/yellow instead of orange
       linewidth: 2,
       transparent: true,
-      opacity: 0.5
+      opacity: 0.7
     })
   };
 

@@ -692,6 +692,25 @@ function resolvePafSegmentDepthMm(segment, wallThickness) {
   return Math.min(12, wallThickness);
 }
 
+function isPathClosed(points, tolerance = 1e-6) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return false;
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (!first || !last) {
+    return false;
+  }
+  return (
+    Number.isFinite(first.x) &&
+    Number.isFinite(first.y) &&
+    Number.isFinite(last.x) &&
+    Number.isFinite(last.y) &&
+    Math.abs(first.x - last.x) <= tolerance &&
+    Math.abs(first.y - last.y) <= tolerance
+  );
+}
+
 function computePolygonWindingOrder(points) {
   // Use the shoelace formula to determine polygon winding order
   // Positive area = counter-clockwise, Negative area = clockwise
@@ -710,7 +729,8 @@ function computePolygonWindingOrder(points) {
   return Math.sign(area);
 }
 
-function offsetPolygonPoints(points, offsetDistance) {
+function offsetPolygonPoints(points, offsetDistance, options = {}) {
+  const { closed = true } = options;
   if (!Array.isArray(points) || points.length < 3 || !Number.isFinite(offsetDistance)) {
     return points;
   }
@@ -725,9 +745,29 @@ function offsetPolygonPoints(points, offsetDistance) {
   const n = points.length;
 
   for (let i = 0; i < n; i++) {
-    const prev = points[(i - 1 + n) % n];
+    const prev = closed ? points[(i - 1 + n) % n] : points[i - 1];
     const curr = points[i];
-    const next = points[(i + 1) % n];
+    const next = closed ? points[(i + 1) % n] : points[i + 1];
+
+    if ((!prev || !next) && !closed) {
+      // Endpoints of an open path - offset using the available segment normal
+      const dirX = prev ? curr.x - prev.x : next.x - curr.x;
+      const dirY = prev ? curr.y - prev.y : next.y - curr.y;
+      const len = Math.sqrt(dirX * dirX + dirY * dirY);
+      if (len < 1e-6) {
+        offsetPoints.push({ x: curr.x, y: curr.y });
+        continue;
+      }
+      const unitX = dirX / len;
+      const unitY = dirY / len;
+      const perpX = -unitY;
+      const perpY = unitX;
+      offsetPoints.push({
+        x: curr.x + perpX * adjustedOffset,
+        y: curr.y + perpY * adjustedOffset
+      });
+      continue;
+    }
 
     // Calculate edge vectors
     const v1x = curr.x - prev.x;
@@ -925,9 +965,10 @@ function createPafSegmentMesh(segment, routing, context) {
  * @param {Object} offsets - Coordinate offsets
  * @param {Number} scale - World scale
  * @param {Number} zPosition - Z coordinate for the line
+ * @param {Boolean} closePath - Whether to close the path (default true)
  * @returns {THREE.BufferGeometry} Line geometry
  */
-function createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, zPosition) {
+function createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, zPosition, closePath = true) {
   const points3D = [];
 
   if (pathSegments && pathSegments.length > 0) {
@@ -988,9 +1029,12 @@ function createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, zP
     // Note: Path closing is handled by the pathSegments forming a closed loop
   } else {
     // Simple polygon without arcs - create line segments between consecutive points
-    for (let i = 0; i < worldPoints.length; i++) {
+    const numSegments = closePath ? worldPoints.length : worldPoints.length - 1;
+    for (let i = 0; i < numSegments; i++) {
       const pt1 = worldPoints[i];
-      const pt2 = worldPoints[(i + 1) % worldPoints.length]; // Wrap around to close the path
+      const pt2 = closePath
+        ? worldPoints[(i + 1) % worldPoints.length]  // Wrap around to close the path
+        : worldPoints[i + 1];                         // Don't wrap, leave path open
       points3D.push(new THREE.Vector3(pt1.x, pt1.y, zPosition));
       points3D.push(new THREE.Vector3(pt2.x, pt2.y, zPosition));
     }
@@ -1021,6 +1065,7 @@ function createPafPolygonMesh(segment, routing, context) {
   if (deduped.length < 3) {
     return null;
   }
+  const isClosedPath = isPathClosed(points);
 
   const worldPoints = deduped.map(point => convertPointToWorld(point, offsets, scale));
   const centroid = worldPoints
@@ -1126,16 +1171,34 @@ function createPafPolygonMesh(segment, routing, context) {
     group.add(line);
 
     const expansionMm = adjustment.expansion / 2; // expansion per side
-    const offsetPoints = offsetPolygonPoints(deduped, expansionMm);
+    const offsetPoints = offsetPolygonPoints(deduped, expansionMm, { closed: isClosedPath });
+    const cleanedOffsetPoints = Array.isArray(offsetPoints) ? dedupeSequentialPoints(offsetPoints) : null;
 
-    if (offsetPoints && offsetPoints.length >= 3) {
-      const offsetWorldPoints = offsetPoints.map(point => convertPointToWorld(point, offsets, scale));
+    if (cleanedOffsetPoints && cleanedOffsetPoints.length >= 3) {
+      const offsetWorldPoints = cleanedOffsetPoints.map(point => convertPointToWorld(point, offsets, scale));
 
-      // Create expanded path line geometry
-      const expandedGeometry = createPafPathLineGeometry(offsetWorldPoints, null, offsets, scale, lineZ);
-      const expandedLine = new THREE.LineSegments(expandedGeometry, materials.pafOvercuttingLine);
+      // Build expanded path segments and skip zero-length spans; optionally close loop for closed paths
+      const expandedPoints3D = [];
+      const segmentCount = isClosedPath ? offsetWorldPoints.length : offsetWorldPoints.length - 1;
+      for (let i = 0; i < segmentCount; i += 1) {
+        const pt1 = offsetWorldPoints[i];
+        const nextIndex = isClosedPath ? (i + 1) % offsetWorldPoints.length : i + 1;
+        if (!isClosedPath && nextIndex >= offsetWorldPoints.length) {
+          continue;
+        }
+        const pt2 = offsetWorldPoints[nextIndex];
+        if (pt1.distanceTo(pt2) < 1e-6) {
+          continue;
+        }
+        expandedPoints3D.push(new THREE.Vector3(pt1.x, pt1.y, lineZ));
+        expandedPoints3D.push(new THREE.Vector3(pt2.x, pt2.y, lineZ));
+      }
 
-      group.add(expandedLine);
+      if (expandedPoints3D.length > 0) {
+        const expandedGeometry = new THREE.BufferGeometry().setFromPoints(expandedPoints3D);
+        const expandedLine = new THREE.LineSegments(expandedGeometry, materials.pafOvercuttingLine);
+        group.add(expandedLine);
+      }
     }
 
     group.position.set(0, 0, 0);
