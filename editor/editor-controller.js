@@ -13,6 +13,7 @@ import { createHud } from "./ui/hud.js";
 import { DeleteCommand } from "./commands/delete.js";
 import { TranslateCommand } from "./commands/move-translate.js";
 import { saveAsModified } from "./io/save.js";
+import { rebuildPafSegmentGeometry } from "./utils/paf-geometry.js";
 
 const KIND_TO_COLLECTION = {
   nailRow: "nailRows",
@@ -240,7 +241,7 @@ export class EditorController {
       });
 
       // Create source viewer
-      this.sourceViewer = createSourceViewer({ container, state: this.state });
+      this.sourceViewer = createSourceViewer({ container, state: this.state, controller: this });
 
       // Create PAF menu with View Source callback
       this.pafMenu = createPafParameterMenu({
@@ -414,7 +415,53 @@ export class EditorController {
     const command = this.commands.create("translate");
     if (command && command.begin()) {
       this.activeCommand = command;
-      this.showHudMessage("Translate — press X, Y, or Z to pick an axis.");
+    }
+  }
+
+  startCoordinateEditFromSource({ object, axis, originValue, label, context = null } = {}) {
+    if (!object || typeof axis !== "string" || !["x", "y", "z"].includes(axis)) {
+      this.showHudMessage("Cannot edit that coordinate.");
+      return;
+    }
+    if (!Number.isFinite(originValue)) {
+      this.showHudMessage("Coordinate has no numeric value to edit.");
+      return;
+    }
+
+    const resolved = this.resolveWorkingElement(object);
+    if (!resolved || !resolved.item || typeof resolved.item.__editorId !== "number") {
+      this.showHudMessage("Cannot resolve item for coordinate edit.");
+      return;
+    }
+
+    if (this.activeCommand) {
+      this.cancelActiveCommand();
+    }
+
+    const selected = this.selection.replace(object, false);
+    if (!selected) {
+      this.showHudMessage("Cannot select item for coordinate edit.");
+      return;
+    }
+
+    const combinedContext = {
+      ...(context ?? {}),
+      kind: (context && context.kind) || resolved.kind,
+      editorId: resolved.item.__editorId
+    };
+
+    const command = this.commands.create("translate", {
+      mode: "absolute",
+      initialAxis: axis,
+      originValue,
+      label,
+      context: combinedContext
+    });
+
+    if (command && command.begin()) {
+      this.activeCommand = command;
+    } else {
+      this.showHudMessage("Could not start coordinate edit.");
     }
   }
 
@@ -426,13 +473,40 @@ export class EditorController {
     }
   }
 
-  updateTranslateHud({ axis, input }) {
+  updateTranslateHud({ axis, input, mode = "offset", origin = null, label = null, rawValue = null, translationValue = null }) {
     if (!axis) {
-      this.showHudMessage("Translate — press X, Y, or Z to pick an axis.");
+      if (mode === "absolute") {
+        const originText = Number.isFinite(origin) ? `${formatNumber(origin)} mm` : "unknown";
+        this.showHudMessage(`Set coordinate — current ${originText}. Type new value, Enter to apply, Esc to cancel.`);
+      } else {
+        this.showHudMessage("Translate — press X, Y, or Z to pick an axis.");
+      }
       return;
     }
-    const label = input ? `${input} mm` : "type distance";
-    this.showHudMessage(`Translate along ${axis.toUpperCase()} — ${label}, Enter to apply, Esc to cancel.`);
+
+    if (mode === "absolute") {
+      const axisLabel = axis.toUpperCase();
+      const targetLabel = label ?? `${axisLabel} coordinate`;
+      if (!input) {
+        const originText = Number.isFinite(origin) ? `${formatNumber(origin)} mm` : "unknown";
+        this.showHudMessage(`Set ${targetLabel} — current ${originText}. Type new value, Enter to apply, Esc to cancel.`);
+        return;
+      }
+      if (Number.isFinite(rawValue)) {
+        const destination = formatNumber(rawValue);
+        let deltaText = "";
+        if (Number.isFinite(translationValue) && translationValue !== 0) {
+          deltaText = ` (Δ ${formatNumber(translationValue)} mm)`;
+        }
+        this.showHudMessage(`Set ${targetLabel} to ${destination} mm${deltaText}. Enter to apply, Esc to cancel.`);
+      } else {
+        this.showHudMessage(`Set ${targetLabel} — enter a numeric value, Enter to apply, Esc to cancel.`);
+      }
+      return;
+    }
+
+    const labelText = input ? `${input} mm` : "type distance";
+    this.showHudMessage(`Translate along ${axis.toUpperCase()} — ${labelText}, Enter to apply, Esc to cancel.`);
   }
 
   updateTranslatePreview({ axis, value }) {
@@ -454,10 +528,33 @@ export class EditorController {
     this.overlays.showNewState(selection, translation);
   }
 
-  applyTranslation({ axis, value }) {
+  applyTranslation({ axis, value, mode = "offset", context = null, rawValue = null, label = null }) {
     if (!this.workingModel) {
       return;
     }
+
+    if (mode === "absolute" && context) {
+      const result = this.applyAbsoluteCoordinateEdit({
+        axis,
+        translation: value,
+        rawValue,
+        context,
+        label
+      });
+      if (!result?.success) {
+        if (result?.message) {
+          this.showHudMessage(result.message);
+        }
+        return;
+      }
+      this.recalculateBounds();
+      this.refreshViewer();
+      this.cancelActiveCommand();
+      this.state.setDirty(true);
+      this.showHudMessage(result.message);
+      return;
+    }
+
     const mm = Number(value);
     if (!Number.isFinite(mm) || mm === 0) {
       this.showHudMessage("Enter a non-zero distance in millimetres.");
@@ -656,17 +753,191 @@ export class EditorController {
     }
 
     if (pointsModified) {
-      // Clear all old statement indices for this PAF (PP/KB/MP lines)
-      if (Array.isArray(routing.__statementIndices)) {
-        for (let i = 1; i < routing.__statementIndices.length; i++) {
-          this.setStatementText(routing.__statementIndices[i], null);
-        }
-      }
-      // Set the rebuilt multi-line PAF statement at the first index
-      this.setStatementText(routing.__statementIndex, buildPafStatement(routing));
+      this.updatePafStatements(routing);
     }
 
     return pointsModified;
+  }
+
+  updatePafStatements(routing) {
+    if (!routing) {
+      return;
+    }
+    if (Array.isArray(routing.__statementIndices)) {
+      for (let i = 1; i < routing.__statementIndices.length; i += 1) {
+        this.setStatementText(routing.__statementIndices[i], null);
+      }
+    }
+    this.setStatementText(routing.__statementIndex, buildPafStatement(routing));
+  }
+
+  applyAbsoluteCoordinateEdit({ axis, rawValue, context, label }) {
+    if (!context || typeof context !== "object") {
+      return { success: false, message: "Cannot edit that coordinate." };
+    }
+    const kind = context.kind;
+    const editorId = context.editorId;
+    if (!kind || !Number.isFinite(editorId)) {
+      return { success: false, message: "Cannot edit that coordinate." };
+    }
+
+    const item = this.getWorkingItem(kind, editorId);
+    if (!item) {
+      return { success: false, message: "Item no longer exists." };
+    }
+
+    const numericValue = Number(rawValue);
+    if (!Number.isFinite(numericValue)) {
+      return { success: false, message: "Enter a numeric coordinate in millimetres." };
+    }
+
+    let updated = false;
+    switch (kind) {
+      case "nailRow":
+        updated = this.setNailRowCoordinate(item, context.valueIndex, numericValue);
+        break;
+      case "boy":
+        updated = this.setBoyCoordinate(item, context.valueIndex, numericValue);
+        break;
+      case "paf":
+        updated = this.setPafCoordinate(item, context, numericValue);
+        break;
+      default:
+        updated = false;
+    }
+
+    if (!updated) {
+      return { success: false, message: "Cannot edit that coordinate." };
+    }
+
+    const formatted = formatNumber(numericValue);
+    const message =
+      label && formatted !== null
+        ? `Set ${label} to ${formatted} mm.`
+        : `Updated ${axis ? axis.toUpperCase() : "coordinate"} to ${formatted} mm.`;
+
+    return { success: true, message };
+  }
+
+  getWorkingItem(kind, editorId) {
+    const collectionName = KIND_TO_COLLECTION[kind];
+    if (!collectionName) {
+      return null;
+    }
+    const collection = this.workingModel?.[collectionName];
+    if (!Array.isArray(collection)) {
+      return null;
+    }
+    return collection.find(entry => Number(entry?.__editorId) === Number(editorId)) ?? null;
+  }
+
+  setNailRowCoordinate(row, valueIndex, value) {
+    if (!row || typeof row !== "object" || !row.start || !row.end) {
+      return false;
+    }
+    if (!Array.isArray(row.source) || row.source.length < 4) {
+      return false;
+    }
+    switch (valueIndex) {
+      case 0:
+        row.start.x = value;
+        row.source[0] = value;
+        break;
+      case 1:
+        row.start.y = value;
+        row.source[1] = value;
+        break;
+      case 2:
+        row.end.x = value;
+        row.source[2] = value;
+        break;
+      case 3:
+        row.end.y = value;
+        row.source[3] = value;
+        break;
+      default:
+        return false;
+    }
+    this.setStatementText(row.__statementIndex, buildNailRowStatement(row));
+    return true;
+  }
+
+  setBoyCoordinate(operation, valueIndex, value) {
+    if (!operation || typeof operation !== "object" || !Array.isArray(operation.source)) {
+      return false;
+    }
+    if (valueIndex === 0) {
+      const delta = Number.isFinite(operation.x) ? value - operation.x : 0;
+      operation.x = value;
+      operation.source[0] = value;
+      if (Number.isFinite(operation.localX)) {
+        operation.localX += delta;
+      }
+    } else if (valueIndex === 1) {
+      const delta = Number.isFinite(operation.z) ? value - operation.z : 0;
+      operation.z = value;
+      operation.source[1] = value;
+      if (Number.isFinite(operation.localZ)) {
+        operation.localZ += delta;
+      }
+    } else {
+      return false;
+    }
+    this.setStatementText(operation.__statementIndex, buildBoyStatement(operation));
+    return true;
+  }
+
+  setPafCoordinate(routing, context, value) {
+    if (!routing || typeof routing !== "object" || !Array.isArray(routing.segments)) {
+      return false;
+    }
+    const segmentIndex = Number(context.segmentIndex);
+    if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentIndex >= routing.segments.length) {
+      return false;
+    }
+    const segment = routing.segments[segmentIndex];
+    if (!segment) {
+      return false;
+    }
+
+    if (context.command === "MP") {
+      const numberIndex = Number(context.numberIndex);
+      if (!Number.isInteger(numberIndex) || !Array.isArray(segment.source) || numberIndex < 0 || numberIndex >= segment.source.length) {
+        return false;
+      }
+      segment.source[numberIndex] = value;
+      if (!segment.position || typeof segment.position !== "object") {
+        segment.position = {};
+      }
+      if (numberIndex === 0) {
+        segment.position.x = value;
+      } else if (numberIndex === 1) {
+        segment.position.y = value;
+      }
+    } else if (context.command === "PP" || context.command === "KB") {
+      const entryIndex = Number(context.entryIndex);
+      const numberIndex = Number(context.numberIndex);
+      if (
+        !Number.isInteger(entryIndex) ||
+        !Number.isInteger(numberIndex) ||
+        entryIndex < 0 ||
+        !Array.isArray(segment.source) ||
+        entryIndex >= segment.source.length
+      ) {
+        return false;
+      }
+      const sourceEntry = segment.source[entryIndex];
+      if (!sourceEntry || !Array.isArray(sourceEntry.numbers) || numberIndex < 0 || numberIndex >= sourceEntry.numbers.length) {
+        return false;
+      }
+      sourceEntry.numbers[numberIndex] = value;
+      rebuildPafSegmentGeometry(segment);
+    } else {
+      return false;
+    }
+
+    this.updatePafStatements(routing);
+    return true;
   }
 
   startDeleteCommand() {

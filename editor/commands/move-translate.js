@@ -1,28 +1,43 @@
 import { EditorMode } from "../state/editor-state.js";
 
 const VALID_AXIS = new Set(["x", "y", "z"]);
+const MODE_OFFSET = "offset";
+const MODE_ABSOLUTE = "absolute";
 
 export class TranslateCommand {
-  constructor({ state, selection, controller }) {
+  constructor({
+    state,
+    selection,
+    controller,
+    mode = MODE_OFFSET,
+    initialAxis = null,
+    originValue = null,
+    label = null,
+    initialInput = "",
+    context = null
+  }) {
     this.state = state;
     this.selection = selection;
     this.controller = controller;
-    this.axis = null;
-    this.input = "";
+    this.mode = mode === MODE_ABSOLUTE ? MODE_ABSOLUTE : MODE_OFFSET;
+    this.axis = VALID_AXIS.has(initialAxis) ? initialAxis : null;
+    this.originValue = Number.isFinite(originValue) ? originValue : null;
+    this.label = typeof label === "string" && label.length ? label : null;
+    this.initialInput = typeof initialInput === "string" ? initialInput : "";
+    this.input = this.initialInput;
+    this.context = context;
     this.name = "translate";
   }
 
   begin() {
-    this.axis = null;
-    this.input = "";
     if (!this.selection.getSelection().length) {
       this.controller.showHudMessage("Select one or more items to move (press G).");
       return false;
     }
     this.state.setActiveCommand(this);
-    this.state.setPendingCommand({ name: this.name, axis: null, value: null });
-    this.state.setMode(EditorMode.CommandPending);
+    this.state.setMode(this.axis ? EditorMode.NumericInput : EditorMode.CommandPending);
     this.controller.beginTranslatePreview();
+    this.updateFeedback();
     return true;
   }
 
@@ -32,12 +47,16 @@ export class TranslateCommand {
     }
     if (this.axis !== axis) {
       this.input = "";
+      this.axis = axis;
     }
-    this.axis = axis;
+    if (this.mode === MODE_ABSOLUTE && !Number.isFinite(this.originValue)) {
+      // Absolute edits require a baseline value; bail out gracefully.
+      this.controller.showHudMessage("Cannot edit coordinate — original value missing.");
+      return;
+    }
     this.state.setPendingCommand({ name: this.name, axis, value: null });
     this.state.setMode(EditorMode.NumericInput);
-    this.controller.updateTranslateHud({ axis, input: this.input });
-    this.controller.updateTranslatePreview({ axis, value: this.getValue() });
+    this.updateFeedback();
   }
 
   appendInput(char) {
@@ -63,9 +82,7 @@ export class TranslateCommand {
     } else if (/\d/.test(char)) {
       this.input += char;
     }
-    this.state.setPendingCommand({ name: this.name, axis: this.axis, value: this.getValue() });
-    this.controller.updateTranslateHud({ axis: this.axis, input: this.input });
-    this.controller.updateTranslatePreview({ axis: this.axis, value: this.getValue() });
+    this.updateFeedback();
   }
 
   removeInput() {
@@ -73,9 +90,7 @@ export class TranslateCommand {
       return;
     }
     this.input = this.input.slice(0, -1);
-    this.state.setPendingCommand({ name: this.name, axis: this.axis, value: this.getValue() });
-    this.controller.updateTranslateHud({ axis: this.axis, input: this.input });
-    this.controller.updateTranslatePreview({ axis: this.axis, value: this.getValue() });
+    this.updateFeedback();
   }
 
   getValue() {
@@ -83,13 +98,106 @@ export class TranslateCommand {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  confirm() {
+  getTranslationValue() {
     const value = this.getValue();
-    if (!this.axis || !Number.isFinite(value)) {
-      this.controller.showHudMessage("Enter a numeric distance in mm, then press Enter.");
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    if (this.mode === MODE_ABSOLUTE) {
+      if (!Number.isFinite(this.originValue)) {
+        return null;
+      }
+      return value - this.originValue;
+    }
+    return value;
+  }
+
+  updateFeedback() {
+    if (!this.state) {
       return;
     }
-    this.controller.applyTranslation({ axis: this.axis, value });
+    if (!this.axis) {
+      this.state.setPendingCommand({
+        name: this.name,
+        axis: null,
+        value: null,
+        mode: this.mode,
+        context: this.context
+      });
+      this.controller.updateTranslateHud({
+        axis: null,
+        input: this.input,
+        mode: this.mode,
+        origin: this.originValue,
+        label: this.label,
+        rawValue: null,
+        translationValue: null
+      });
+      return;
+    }
+    const rawValue = this.getValue();
+    const translationValue = this.getTranslationValue();
+    this.state.setPendingCommand({
+      name: this.name,
+      axis: this.axis,
+      value: translationValue,
+      mode: this.mode,
+      rawValue,
+      context: this.context
+    });
+    this.controller.updateTranslateHud({
+      axis: this.axis,
+      input: this.input,
+      mode: this.mode,
+      origin: this.originValue,
+      label: this.label,
+      rawValue,
+      translationValue
+    });
+    if (translationValue !== null) {
+      this.controller.updateTranslatePreview({ axis: this.axis, value: translationValue });
+    } else {
+      this.controller.updateTranslatePreview({ axis: this.axis, value: null });
+    }
+  }
+
+  confirm() {
+    if (!this.axis) {
+      if (this.mode === MODE_ABSOLUTE) {
+        this.controller.showHudMessage("Select an axis to edit before entering a coordinate.");
+      } else {
+        this.controller.showHudMessage("Translate — press X, Y, or Z to pick an axis.");
+      }
+      return;
+    }
+    const rawValue = this.getValue();
+    if (!Number.isFinite(rawValue)) {
+      const message =
+        this.mode === MODE_ABSOLUTE
+          ? "Enter a numeric coordinate in mm, then press Enter."
+          : "Enter a numeric distance in mm, then press Enter.";
+      this.controller.showHudMessage(message);
+      return;
+    }
+    const translationValue = this.getTranslationValue();
+    if (!Number.isFinite(translationValue)) {
+      this.controller.showHudMessage("Cannot determine translation distance for that coordinate.");
+      return;
+    }
+    if (translationValue === 0) {
+      this.controller.cancelActiveCommand();
+      this.controller.showHudMessage("No change — coordinate remains the same.");
+      return;
+    }
+    const payload = {
+      axis: this.axis,
+      value: translationValue,
+      mode: this.mode,
+      context: this.context,
+      rawValue,
+      label: this.label
+    };
+    this.controller.applyTranslation(payload);
   }
 
   cancel() {

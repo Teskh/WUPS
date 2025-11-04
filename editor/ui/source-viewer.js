@@ -32,41 +32,147 @@ function generateSourceLines(operation, model) {
       const pafStatement = statements[pafIndex];
       lines.push({
         text: pafStatement,
-        tooltip: "PAF (Panel Assembly Function): Defines a routing operation for cutting or milling",
+        tooltip: "PAF: Defines a routing operation for cutting or milling",
         tokens: parsePafTokens(routing, pafStatement)
       });
     }
 
     // Handle segment-specific lines
     if (segment) {
+      const segmentIndex = Array.isArray(routing.segments)
+        ? routing.segments.findIndex(candidate => candidate === segment)
+        : -1;
+
       // Handle MP (circular) segments
       if (segment.position && Array.isArray(segment.source)) {
+        const editableMeta = Array.isArray(segment.source)
+          ? segment.source.map((value, numberIndex) => {
+              if (segmentIndex < 0) {
+                return null;
+              }
+              const numeric = Number(value);
+              if (numberIndex === 0 && Number.isFinite(numeric)) {
+                return {
+                  context: {
+                    kind: "paf",
+                    segmentIndex,
+                    command: "MP",
+                    numberIndex
+                  },
+                  label: "MP Center X"
+                };
+              }
+              if (numberIndex === 1 && Number.isFinite(numeric)) {
+                return {
+                  context: {
+                    kind: "paf",
+                    segmentIndex,
+                    command: "MP",
+                    numberIndex
+                  },
+                  label: "MP Center Y"
+                };
+              }
+              return null;
+            })
+          : [];
         const mpLine = formatMPCommand(segment.source);
         lines.push({
           text: mpLine,
           tooltip: "MP (Circle Point): Defines a circular routing operation",
-          tokens: parseMPTokens(segment.source)
+          tokens: parseMPTokens(segment.source, {
+            object: operation,
+            labelPrefix: "MP",
+            editableMeta
+          })
         });
       }
       // Handle PP/KB (polygon/polyline) segments - source is array of {command, numbers, type}
       else if (Array.isArray(segment.source)) {
-        for (const sourceEntry of segment.source) {
+        segment.source.forEach((sourceEntry, entryIndex) => {
           if (sourceEntry.command === "PP") {
+            const editableMeta = Array.isArray(sourceEntry.numbers)
+              ? sourceEntry.numbers.map((value, numberIndex) => {
+                  if (segmentIndex < 0) {
+                    return null;
+                  }
+                  const numeric = Number(value);
+                  if (numberIndex === 0 && Number.isFinite(numeric)) {
+                    return {
+                      context: {
+                        kind: "paf",
+                        segmentIndex,
+                        command: "PP",
+                        entryIndex,
+                        numberIndex
+                      },
+                      label: "PP X"
+                    };
+                  }
+                  if (numberIndex === 1 && Number.isFinite(numeric)) {
+                    return {
+                      context: {
+                        kind: "paf",
+                        segmentIndex,
+                        command: "PP",
+                        entryIndex,
+                        numberIndex
+                      },
+                      label: "PP Y"
+                    };
+                  }
+                  return null;
+                })
+              : [];
             const ppLine = formatPPCommand(sourceEntry.numbers);
             lines.push({
               text: ppLine,
               tooltip: "PP (Polygon Point): Defines a point in the routing path",
-              tokens: parsePPTokens(sourceEntry.numbers)
+              tokens: parsePPTokens(sourceEntry.numbers, {
+                object: operation,
+                labelPrefix: "PP",
+                editableMeta
+              })
             });
           } else if (sourceEntry.command === "KB") {
+            const editableMeta = Array.isArray(sourceEntry.numbers)
+              ? sourceEntry.numbers.map((value, numberIndex) => {
+                  if (segmentIndex < 0) {
+                    return null;
+                  }
+                  const numeric = Number(value);
+                  const isCoordinateIndex = numberIndex === 0 || numberIndex === 1;
+                  if (!isCoordinateIndex || !Number.isFinite(numeric)) {
+                    return null;
+                  }
+                  const labelSuffix =
+                    numberIndex === 0
+                      ? "End X"
+                      : "End Y";
+                  return {
+                    context: {
+                      kind: "paf",
+                      segmentIndex,
+                      command: "KB",
+                      entryIndex,
+                      numberIndex
+                    },
+                    label: `KB ${labelSuffix}`
+                  };
+                })
+              : [];
             const kbLine = formatKBCommand(sourceEntry.numbers, sourceEntry.type);
             lines.push({
               text: kbLine,
               tooltip: "KB (Curve/Arc): Defines an arc segment in the routing path",
-              tokens: parseKBTokens(sourceEntry.numbers, sourceEntry.type)
+              tokens: parseKBTokens(sourceEntry.numbers, sourceEntry.type, {
+                object: operation,
+                labelPrefix: "KB",
+                editableMeta
+              })
             });
           }
-        }
+        });
       }
     }
   }
@@ -80,7 +186,7 @@ function generateSourceLines(operation, model) {
         lines.push({
           text: statement,
           tooltip: "BOY: Defines a drilling operation (typically for bolts or fasteners)",
-          tokens: parseBoyTokens(boyOp)
+          tokens: parseBoyTokens(boyOp, { object: operation })
         });
       }
     }
@@ -95,7 +201,7 @@ function generateSourceLines(operation, model) {
         lines.push({
           text: statement,
           tooltip: "NR (Nail row): Defines a line of nails for fastening",
-          tokens: parseNailRowTokens(nailRow)
+          tokens: parseNailRowTokens(nailRow, { object: operation })
         });
       }
     }
@@ -113,7 +219,7 @@ function parsePafTokens(routing, statement) {
   // Match "PAF 2,0,1;" or "PAF;"
   const parts = statement.match(/PAF\s*([^;]*)/);
 
-  tokens.push({ text: "PAF", tooltip: "Command: Panel Assembly Function", span: "command" });
+  tokens.push({ text: "PAF", tooltip: "Command: PAF", span: "command" });
 
   if (!parts || !parts[1] || !parts[1].trim()) {
     tokens.push({ text: ";", tooltip: null, span: "punctuation" });
@@ -167,7 +273,7 @@ function parsePafTokens(routing, statement) {
 /**
  * Parse PP (Polygon Point) command tokens
  */
-function parsePPTokens(numbers) {
+function parsePPTokens(numbers, options = {}) {
   const tokens = [];
 
   tokens.push({ text: "PP", tooltip: "Command: Polygon Point", span: "command" });
@@ -179,6 +285,7 @@ function parsePPTokens(numbers) {
     { name: "t", desc: "Depth of cut" },
     { name: "i", desc: "Control code (tool offset/compensation)" }
   ];
+  const { object = null, labelPrefix = "PP", editableMeta = [] } = options;
 
   numbers.forEach((num, index) => {
     if (index > 0) {
@@ -186,11 +293,32 @@ function parsePPTokens(numbers) {
     }
 
     const label = labels[index] || { name: `Param ${index}`, desc: "Parameter" };
-    tokens.push({
+    const token = {
       text: num.toString(),
       tooltip: `${label.name}: ${num} - ${label.desc}`,
       span: "parameter"
-    });
+    };
+
+    const meta = Array.isArray(editableMeta) ? editableMeta[index] : null;
+    const numericValue = Number.parseFloat(num);
+    let axis = null;
+    if (index === 0) {
+      axis = "x";
+    } else if (index === 1) {
+      axis = "y";
+    }
+    if (meta && axis && object && Number.isFinite(numericValue)) {
+      const labelText = meta.label ?? (labelPrefix ? `${labelPrefix} ${label.name}`.trim() : label.name);
+      token.editable = {
+        axis: meta.axis ?? axis,
+        object,
+        originValue: numericValue,
+        label: labelText,
+        context: meta.context ?? null
+      };
+    }
+
+    tokens.push(token);
   });
 
   tokens.push({ text: ";", tooltip: null, span: "punctuation" });
@@ -201,7 +329,7 @@ function parsePPTokens(numbers) {
 /**
  * Parse KB (arc/curve) command tokens
  */
-function parseKBTokens(numbers, type) {
+function parseKBTokens(numbers, type, options = {}) {
   const tokens = [];
 
   tokens.push({ text: "KB", tooltip: "Command: Curve/Arc segment", span: "command" });
@@ -215,6 +343,7 @@ function parseKBTokens(numbers, type) {
     { name: "t", desc: "Depth of cut" },
     { name: "i", desc: "Control code" }
   ];
+  const { object = null, labelPrefix = "KB", editableMeta = [] } = options;
 
   numbers.forEach((num, index) => {
     if (index > 0) {
@@ -222,11 +351,32 @@ function parseKBTokens(numbers, type) {
     }
 
     const label = labels[index] || { name: `Param ${index}`, desc: "Parameter" };
-    tokens.push({
+    const token = {
       text: num.toString(),
       tooltip: `${label.name}: ${num} - ${label.desc}`,
       span: "parameter"
-    });
+    };
+
+    let axis = null;
+    if (index === 0 || index === 2) {
+      axis = "x";
+    } else if (index === 1) {
+      axis = "y";
+    }
+    const numericValue = Number.parseFloat(num);
+    const meta = Array.isArray(editableMeta) ? editableMeta[index] : null;
+    if (meta && axis && object && Number.isFinite(numericValue)) {
+      const labelText = meta.label ?? (labelPrefix ? `${labelPrefix} ${label.name}`.trim() : label.name);
+      token.editable = {
+        axis: meta.axis ?? axis,
+        object,
+        originValue: numericValue,
+        label: labelText,
+        context: meta.context ?? null
+      };
+    }
+
+    tokens.push(token);
   });
 
   if (type) {
@@ -246,7 +396,7 @@ function parseKBTokens(numbers, type) {
 /**
  * Parse MP (Circle Point) command tokens
  */
-function parseMPTokens(numbers) {
+function parseMPTokens(numbers, options = {}) {
   const tokens = [];
 
   tokens.push({ text: "MP", tooltip: "Command: Circle/Circular routing", span: "command" });
@@ -260,6 +410,7 @@ function parseMPTokens(numbers) {
     { name: "i", desc: "Control code" },
     { name: "Additional", desc: "Additional parameter" }
   ];
+  const { object = null, labelPrefix = "MP", editableMeta = [] } = options;
 
   numbers.forEach((num, index) => {
     if (index > 0) {
@@ -267,11 +418,32 @@ function parseMPTokens(numbers) {
     }
 
     const label = labels[index] || { name: `Param ${index}`, desc: "Parameter" };
-    tokens.push({
+    const token = {
       text: num.toString(),
       tooltip: `${label.name}: ${num} - ${label.desc}`,
       span: "parameter"
-    });
+    };
+
+    let axis = null;
+    if (index === 0) {
+      axis = "x";
+    } else if (index === 1) {
+      axis = "y";
+    }
+    const meta = Array.isArray(editableMeta) ? editableMeta[index] : null;
+    const numericValue = Number.parseFloat(num);
+    if (meta && axis && object && Number.isFinite(numericValue)) {
+      const labelText = meta.label ?? (labelPrefix ? `${labelPrefix} ${label.name}`.trim() : label.name);
+      token.editable = {
+        axis: meta.axis ?? axis,
+        object,
+        originValue: numericValue,
+        label: labelText,
+        context: meta.context ?? null
+      };
+    }
+
+    tokens.push(token);
   });
 
   tokens.push({ text: ";", tooltip: null, span: "punctuation" });
@@ -282,7 +454,7 @@ function parseMPTokens(numbers) {
 /**
  * Parse BOY command tokens
  */
-function parseBoyTokens(boyOp) {
+function parseBoyTokens(boyOp, options = {}) {
   const tokens = [];
   const source = boyOp.source || [];
 
@@ -295,6 +467,7 @@ function parseBoyTokens(boyOp) {
     { name: "Diameter", desc: "Drill bit diameter" },
     { name: "Depth", desc: "Drilling depth" }
   ];
+  const { object = null, labelPrefix = "BOY" } = options;
 
   source.forEach((num, index) => {
     if (index > 0) {
@@ -302,11 +475,34 @@ function parseBoyTokens(boyOp) {
     }
 
     const label = labels[index] || { name: `Param ${index}`, desc: "Parameter" };
-    tokens.push({
+    const token = {
       text: num.toString(),
       tooltip: `${label.name}: ${num} - ${label.desc}`,
       span: "parameter"
-    });
+    };
+
+    let axis = null;
+    if (index === 0) {
+      axis = "x";
+    } else if (index === 1) {
+      axis = "z";
+    }
+    const numericValue = Number.parseFloat(num);
+    if (axis && object && Number.isFinite(numericValue)) {
+      const labelText = labelPrefix ? `${labelPrefix} ${label.name}`.trim() : label.name;
+      token.editable = {
+        axis,
+        object,
+        originValue: numericValue,
+        label: labelText,
+        context: {
+          kind: "boy",
+          valueIndex: index
+        }
+      };
+    }
+
+    tokens.push(token);
   });
 
   tokens.push({ text: ";", tooltip: null, span: "punctuation" });
@@ -317,7 +513,7 @@ function parseBoyTokens(boyOp) {
 /**
  * Parse nail row command tokens
  */
-function parseNailRowTokens(nailRow) {
+function parseNailRowTokens(nailRow, options = {}) {
   const tokens = [];
   const source = nailRow.source || [];
 
@@ -332,6 +528,7 @@ function parseNailRowTokens(nailRow) {
     { name: "Spacing", desc: "Distance between nails" },
     { name: "Gauge", desc: "Nail gauge/size" }
   ];
+  const { object = null, labelPrefix = "NR" } = options;
 
   source.forEach((num, index) => {
     if (index > 0) {
@@ -339,11 +536,34 @@ function parseNailRowTokens(nailRow) {
     }
 
     const label = labels[index] || { name: `Param ${index}`, desc: "Parameter" };
-    tokens.push({
+    const token = {
       text: num.toString(),
       tooltip: `${label.name}: ${num} - ${label.desc}`,
       span: "parameter"
-    });
+    };
+
+    let axis = null;
+    if (index === 0 || index === 2) {
+      axis = "x";
+    } else if (index === 1 || index === 3) {
+      axis = "y";
+    }
+    const numericValue = Number.parseFloat(num);
+    if (axis && object && Number.isFinite(numericValue)) {
+      const labelText = labelPrefix ? `${labelPrefix} ${label.name}`.trim() : label.name;
+      token.editable = {
+        axis,
+        object,
+        originValue: numericValue,
+        label: labelText,
+        context: {
+          kind: "nailRow",
+          valueIndex: index
+        }
+      };
+    }
+
+    tokens.push(token);
   });
 
   tokens.push({ text: ";", tooltip: null, span: "punctuation" });
@@ -376,7 +596,7 @@ function formatMPCommand(numbers) {
 /**
  * Create the source viewer UI component
  */
-export function createSourceViewer({ container, state } = {}) {
+export function createSourceViewer({ container, state, controller } = {}) {
   if (!container || typeof document === "undefined") {
     return {
       updateSelection: () => {},
@@ -410,6 +630,7 @@ export function createSourceViewer({ container, state } = {}) {
   container.appendChild(root);
 
   let currentModel = null;
+  const editController = controller ?? null;
 
   function hide() {
     root.classList.add("hidden");
@@ -445,6 +666,36 @@ export function createSourceViewer({ container, state } = {}) {
           if (token.tooltip) {
             tokenEl.title = token.tooltip;
             tokenEl.classList.add("has-tooltip");
+          }
+          if (token.editable && editController?.startCoordinateEditFromSource) {
+            const payload = {
+              object: token.editable.object,
+              axis: token.editable.axis,
+              originValue: token.editable.originValue,
+              label: token.editable.label,
+              context: token.editable.context ?? null
+            };
+            if (
+              payload.object &&
+              payload.axis &&
+              Number.isFinite(payload.originValue) &&
+              payload.context
+            ) {
+              tokenEl.classList.add("token-editable");
+              tokenEl.tabIndex = 0;
+              tokenEl.setAttribute("role", "button");
+              const activate = event => {
+                event.preventDefault();
+                event.stopPropagation();
+                editController.startCoordinateEditFromSource(payload);
+              };
+              tokenEl.addEventListener("click", activate);
+              tokenEl.addEventListener("keydown", event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  activate(event);
+                }
+              });
+            }
           }
           lineEl.appendChild(tokenEl);
         }

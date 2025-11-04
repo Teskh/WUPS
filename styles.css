@@ -452,6 +452,16 @@ body {
   color: rgba(31, 42, 55, 0.6);
 }
 
+.source-line .token-editable {
+  cursor: pointer;
+  text-decoration: underline dotted rgba(5, 150, 105, 0.4);
+}
+
+.source-line .token-editable:focus {
+  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline-offset: 2px;
+}
+
 .source-viewer-empty {
   padding: 1rem;
   text-align: center;
