@@ -73,7 +73,7 @@ function generateSourceLines(operation, model) {
 
   // Handle BOY operations
   else if (kind === "boy") {
-    const boyOp = operation.userData.boyOperation;
+    const boyOp = operation.userData.operation;
     if (boyOp && Number.isFinite(boyOp.__statementIndex)) {
       const statement = statements[boyOp.__statementIndex];
       if (statement) {
@@ -88,13 +88,13 @@ function generateSourceLines(operation, model) {
 
   // Handle nail row operations
   else if (kind === "nailRow") {
-    const nailRow = operation.userData.nailRow;
+    const nailRow = operation.userData.row;
     if (nailRow && Number.isFinite(nailRow.__statementIndex)) {
       const statement = statements[nailRow.__statementIndex];
       if (statement) {
         lines.push({
           text: statement,
-          tooltip: "NAG (Nail row): Defines a line of nails for fastening",
+          tooltip: "NR (Nail row): Defines a line of nails for fastening",
           tokens: parseNailRowTokens(nailRow)
         });
       }
