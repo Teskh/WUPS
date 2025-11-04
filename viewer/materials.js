@@ -78,6 +78,26 @@ export function createMaterialLibrary() {
       opacity: 0.25,
       side: THREE.DoubleSide,
       depthWrite: false
+    }),
+    pafRoutingLine: new THREE.LineBasicMaterial({
+      color: 0x8e44ad,
+      linewidth: 3,
+      transparent: true,
+      opacity: 0.95
+    }),
+    pafRoutingLineDashed: new THREE.LineDashedMaterial({
+      color: 0x8e44ad,
+      linewidth: 3,
+      dashSize: 10,
+      gapSize: 5,
+      transparent: true,
+      opacity: 0.95
+    }),
+    pafOvercuttingLine: new THREE.LineBasicMaterial({
+      color: 0xff9800,
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.5
     })
   };
 
@@ -90,16 +110,26 @@ export function createMaterialLibrary() {
     boyOperation: materials.boyOperation.clone(),
     boyArrow: materials.boyArrow.clone(),
     pafRouting: materials.pafRouting.clone(),
-    pafOvercutting: materials.pafOvercutting.clone()
+    pafOvercutting: materials.pafOvercutting.clone(),
+    pafRoutingLine: materials.pafRoutingLine.clone(),
+    pafRoutingLineDashed: materials.pafRoutingLineDashed.clone(),
+    pafOvercuttingLine: materials.pafOvercuttingLine.clone()
   };
 
   highlightMaterials.plate.opacity = 0.8;
   highlightMaterials.plate.depthWrite = false;
 
   Object.values(highlightMaterials).forEach(mat => {
-    mat.emissive.setHex(0xffffff);
-    mat.emissiveIntensity = 0.28;
+    if (mat.emissive !== undefined) {
+      mat.emissive.setHex(0xffffff);
+      mat.emissiveIntensity = 0.28;
+    }
   });
+
+  // Line materials don't have emissive, so we brighten them by increasing opacity
+  highlightMaterials.pafRoutingLine.opacity = 1.0;
+  highlightMaterials.pafRoutingLineDashed.opacity = 1.0;
+  highlightMaterials.pafOvercuttingLine.opacity = 0.8;
 
   const nailMarkerGeometry = createNailMarkerGeometry();
 

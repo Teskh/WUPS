@@ -918,6 +918,88 @@ function createPafSegmentMesh(segment, routing, context) {
   return mesh;
 }
 
+/**
+ * Creates a line-based representation of a polygon PAF path
+ * @param {Array} worldPoints - Points in world coordinates
+ * @param {Array} pathSegments - Arc and line segment descriptors
+ * @param {Object} offsets - Coordinate offsets
+ * @param {Number} scale - World scale
+ * @param {Number} zPosition - Z coordinate for the line
+ * @returns {THREE.BufferGeometry} Line geometry
+ */
+function createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, zPosition) {
+  const points3D = [];
+
+  if (pathSegments && pathSegments.length > 0) {
+    // Build path from segments (lines and arcs)
+    for (const pathSegment of pathSegments) {
+      if (!pathSegment) continue;
+
+      if (pathSegment.type === "line") {
+        const from = convertPointToWorld(pathSegment.from, offsets, scale);
+        const to = convertPointToWorld(pathSegment.to, offsets, scale);
+        points3D.push(new THREE.Vector3(from.x, from.y, zPosition));
+        points3D.push(new THREE.Vector3(to.x, to.y, zPosition));
+      } else if (pathSegment.type === "arc") {
+        const center = convertPointToWorld(pathSegment.center, offsets, scale);
+        const radius = pathSegment.radius * scale;
+        const startAngle = pathSegment.startAngle;
+
+        // Use signedSweep if available, otherwise compute from angles and direction
+        let sweepAngle;
+        if (Number.isFinite(pathSegment.signedSweep)) {
+          sweepAngle = pathSegment.signedSweep;
+        } else {
+          // Fallback: compute sweep with proper angle wrapping
+          const endAngle = pathSegment.endAngle;
+          const clockwise = pathSegment.clockwise;
+          const twoPi = Math.PI * 2;
+
+          if (clockwise) {
+            // Clockwise: go from startAngle to endAngle in negative direction
+            let sweep = startAngle - endAngle;
+            while (sweep <= 0) sweep += twoPi;
+            sweepAngle = -sweep;
+          } else {
+            // Counter-clockwise: go from startAngle to endAngle in positive direction
+            let sweep = endAngle - startAngle;
+            while (sweep <= 0) sweep += twoPi;
+            sweepAngle = sweep;
+          }
+        }
+
+        // Generate points along the arc as line segment pairs
+        const arcSegments = 32;
+        const angleStep = sweepAngle / arcSegments;
+
+        // Create line segments between consecutive arc points
+        for (let i = 0; i < arcSegments; i++) {
+          const angle1 = startAngle + i * angleStep;
+          const angle2 = startAngle + (i + 1) * angleStep;
+          const x1 = center.x + radius * Math.cos(angle1);
+          const y1 = center.y + radius * Math.sin(angle1);
+          const x2 = center.x + radius * Math.cos(angle2);
+          const y2 = center.y + radius * Math.sin(angle2);
+          points3D.push(new THREE.Vector3(x1, y1, zPosition));
+          points3D.push(new THREE.Vector3(x2, y2, zPosition));
+        }
+      }
+    }
+    // Note: Path closing is handled by the pathSegments forming a closed loop
+  } else {
+    // Simple polygon without arcs - create line segments between consecutive points
+    for (let i = 0; i < worldPoints.length; i++) {
+      const pt1 = worldPoints[i];
+      const pt2 = worldPoints[(i + 1) % worldPoints.length]; // Wrap around to close the path
+      points3D.push(new THREE.Vector3(pt1.x, pt1.y, zPosition));
+      points3D.push(new THREE.Vector3(pt2.x, pt2.y, zPosition));
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry().setFromPoints(points3D);
+  return geometry;
+}
+
 function createPafPolygonMesh(segment, routing, context) {
   const {
     materials,
@@ -989,114 +1071,91 @@ function createPafPolygonMesh(segment, routing, context) {
     shape.closePath();
   }
 
-  const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
-  const depthWorld = Math.max(depthMm * scale, scale * 2);
-  const geometry = new THREE.ExtrudeGeometry(shape, { depth: depthWorld, bevelEnabled: false });
-  geometry.translate(0, 0, -depthWorld / 2);
-
   const baseFaceDir = Number.isFinite(routingFaceDir)
     ? routingFaceDir
     : determinePafFaceDirection(routing.face, wallSide);
   const faceDir = layer ? resolveLayerFaceDirection(layer, wallSide) : baseFaceDir;
   const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness);
-  const tinyLift = 0.05;
-  const topZMm = surfaceZMm + faceDir * tinyLift;
-  const centerZMm = topZMm - faceDir * (depthMm / 2);
+  const tinyLift = 0.5; // Increased lift to make lines more visible above surface
+  const lineZMm = surfaceZMm + faceDir * tinyLift;
+  const lineZ = lineZMm * scale;
 
-  const mesh = new THREE.Mesh(geometry, materials.pafRouting);
-  mesh.position.set(centroid.x, centroid.y, centerZMm * scale);
-
-  mesh.userData.kind = "paf";
-  mesh.userData.routing = routing;
-  mesh.userData.segment = segment;
-  mesh.userData.editorId = routing?.__editorId ?? null;
-  mesh.userData.originalMaterial = materials.pafRouting;
+  // Parse control code to determine rendering style
   const controlCode = extractControlCode(segment);
   const controlInfo = parseControlCode(controlCode);
   const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
-  mesh.userData.controlCode = controlCode;
-  mesh.userData.controlInfo = controlInfo;
-  mesh.userData.footprintAdjustment = adjustment;
-  mesh.userData.assumedToolRadius = adjustment?.applied ? DEFAULT_TOOL_RADIUS : null;
+
+  // Determine which material to use based on edge mode (tens digit)
+  const edgeMode = controlInfo?.edgeMode?.code ?? 0;
+  const isUndercut = edgeMode === 2;
+  const baseMaterial = isUndercut ? materials.pafRoutingLineDashed : materials.pafRoutingLine;
+  const highlightMaterial = isUndercut ? highlightMaterials.pafRoutingLineDashed : highlightMaterials.pafRoutingLine;
+
+  // Create main path line geometry
+  const geometry = createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, lineZ);
+
+  const line = new THREE.LineSegments(geometry, baseMaterial);
+
+  // For dashed lines, we need to compute line distances
+  if (isUndercut) {
+    line.computeLineDistances();
+  }
+
+  line.userData.kind = "paf";
+  line.userData.routing = routing;
+  line.userData.segment = segment;
+  line.userData.editorId = routing?.__editorId ?? null;
+  line.userData.originalMaterial = baseMaterial;
+  line.userData.controlCode = controlCode;
+  line.userData.controlInfo = controlInfo;
+  line.userData.footprintAdjustment = adjustment;
+  line.userData.assumedToolRadius = adjustment?.applied ? DEFAULT_TOOL_RADIUS : null;
   const footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS);
   if (footprint) {
-    mesh.userData.cutoutFootprint = footprint;
+    line.userData.cutoutFootprint = footprint;
   }
   const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
-  mesh.userData.layer = resolvedLayer;
-  mesh.userData.setHoverState = state => {
-    mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+  line.userData.layer = resolvedLayer;
+  line.userData.setHoverState = state => {
+    line.material = state ? highlightMaterial : baseMaterial;
   };
 
   // Create overcutting visualization if applicable
   if (adjustment?.applied && adjustment.expansion > 0) {
     const group = new THREE.Group();
-    group.add(mesh);
+    group.add(line);
 
     const expansionMm = adjustment.expansion / 2; // expansion per side
     const offsetPoints = offsetPolygonPoints(deduped, expansionMm);
 
     if (offsetPoints && offsetPoints.length >= 3) {
       const offsetWorldPoints = offsetPoints.map(point => convertPointToWorld(point, offsets, scale));
-      const offsetCentroid = offsetWorldPoints
-        .reduce((acc, pt) => acc.add(pt.clone()), new THREE.Vector2())
-        .multiplyScalar(1 / offsetWorldPoints.length);
 
-      const offsetShape = new THREE.Shape();
+      // Create expanded path line geometry
+      const expandedGeometry = createPafPathLineGeometry(offsetWorldPoints, null, offsets, scale, lineZ);
+      const expandedLine = new THREE.LineSegments(expandedGeometry, materials.pafOvercuttingLine);
 
-      if (pathSegments && pathSegments.length > 0) {
-        // For arc-based paths, we need to offset the arcs as well
-        // For simplicity, use the offset polygon points
-        offsetWorldPoints.forEach((pt, index) => {
-          const relativeX = pt.x - offsetCentroid.x;
-          const relativeY = pt.y - offsetCentroid.y;
-          if (index === 0) {
-            offsetShape.moveTo(relativeX, relativeY);
-          } else {
-            offsetShape.lineTo(relativeX, relativeY);
-          }
-        });
-        offsetShape.closePath();
-      } else {
-        offsetWorldPoints.forEach((pt, index) => {
-          const relativeX = pt.x - offsetCentroid.x;
-          const relativeY = pt.y - offsetCentroid.y;
-          if (index === 0) {
-            offsetShape.moveTo(relativeX, relativeY);
-          } else {
-            offsetShape.lineTo(relativeX, relativeY);
-          }
-        });
-        offsetShape.closePath();
-      }
-
-      const overcutGeometry = new THREE.ExtrudeGeometry(offsetShape, {
-        depth: depthWorld,
-        bevelEnabled: false
-      });
-      overcutGeometry.translate(0, 0, -depthWorld / 2);
-
-      const overcutMesh = new THREE.Mesh(overcutGeometry, materials.pafOvercutting);
-      overcutMesh.position.set(offsetCentroid.x, offsetCentroid.y, centerZMm * scale);
-
-      group.add(overcutMesh);
+      group.add(expandedLine);
     }
 
     group.position.set(0, 0, 0);
 
     // Transfer userData to group
-    group.userData = { ...mesh.userData };
+    group.userData = { ...line.userData };
     group.userData.setHoverState = state => {
-      mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+      line.material = state ? highlightMaterial : baseMaterial;
       // Also update overcutting material if it exists
-      const overcutMesh = group.children.find(child => child.material === materials.pafOvercutting || child.material === highlightMaterials.pafOvercutting);
-      if (overcutMesh) {
-        overcutMesh.material = state ? highlightMaterials.pafOvercutting : materials.pafOvercutting;
+      const overcutLine = group.children.find(child =>
+        child.material === materials.pafOvercuttingLine ||
+        child.material === highlightMaterials.pafOvercuttingLine
+      );
+      if (overcutLine) {
+        overcutLine.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
       }
     };
 
     return group;
   }
 
-  return mesh;
+  return line;
 }
