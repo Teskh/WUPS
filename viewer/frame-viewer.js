@@ -207,6 +207,11 @@ export class FrameViewer {
     );
 
     const scale = calculateScale(wallWidth, wallHeight);
+
+    // Update raycaster threshold to be scale-aware
+    // Use 2mm in model units as the threshold for line picking
+    this.raycaster.params.Line.threshold = scale * 2;
+
     const diag = Math.sqrt((wallWidth * scale) ** 2 + (wallHeight * scale) ** 2);
     const halfDiag = diag / 2 || 1;
     const fovRadians = THREE.MathUtils.degToRad(this.perspectiveFov / 2);
