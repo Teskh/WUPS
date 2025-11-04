@@ -2,12 +2,12 @@ import { parseWup, normalizeModel } from "./wup-parser.js";
 
 let statusEl = null;
 let fileInput = null;
-let loadExampleBtn = null;
 
 if (typeof document !== "undefined") {
   statusEl = document.getElementById("status");
   fileInput = document.getElementById("wupFile");
-  loadExampleBtn = document.getElementById("loadExample");
+  const toggleMenuBtn = document.getElementById("toggleMenu");
+  const uiOverlay = document.querySelector(".ui-overlay");
 
   if (fileInput) {
     fileInput.addEventListener("change", event => {
@@ -21,17 +21,11 @@ if (typeof document !== "undefined") {
     });
   }
 
-  if (loadExampleBtn) {
-    loadExampleBtn.addEventListener("click", () => {
-      fetch("example5.wup")
-        .then(resp => {
-          if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}`);
-          }
-          return resp.text();
-        })
-        .then(text => handleWupText(text, "example.wup"))
-        .catch(err => reportError(`Unable to load bundled example: ${err.message}`));
+  if (toggleMenuBtn && uiOverlay) {
+    toggleMenuBtn.addEventListener("click", () => {
+      uiOverlay.classList.toggle("hidden");
+      toggleMenuBtn.textContent = uiOverlay.classList.contains("hidden") ? "+" : "−";
+      toggleMenuBtn.title = uiOverlay.classList.contains("hidden") ? "Show menu" : "Hide menu";
     });
   }
 }

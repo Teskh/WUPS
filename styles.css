@@ -59,6 +59,33 @@ body {
   backdrop-filter: blur(6px);
   box-shadow: 0 18px 36px rgba(15, 23, 42, 0.18);
   max-width: clamp(18rem, 24vw, 24rem);
+  transition: opacity 200ms ease-in-out;
+}
+
+.ui-overlay.hidden {
+  display: none;
+}
+
+.menu-toggle {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  z-index: 1001;
+  padding: 0.5rem 0.75rem;
+  font-size: 1.5rem;
+  font-weight: 300;
+  line-height: 1;
+  border: 1px solid rgba(31, 42, 55, 0.22);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--stroke);
+  cursor: pointer;
+  transition: background 120ms ease-in-out, border-color 120ms;
+}
+
+.menu-toggle:hover {
+  background: rgba(58, 123, 213, 0.14);
+  border-color: rgba(31, 42, 55, 0.35);
 }
 
 .controls {

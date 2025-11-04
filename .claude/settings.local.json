@@ -3,7 +3,9 @@
     "allow": [
       "Bash(node -c:*)",
       "Bash(node diagnostics/test-outlet-diagnostic.js:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(ls:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []
