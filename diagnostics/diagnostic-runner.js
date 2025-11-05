@@ -7,6 +7,7 @@
 
 import { runBoyDiagnostics, formatDiagnosticReport as formatBoyReport } from "./boy-diagnostics.js";
 import { runOutletDiagnostics, formatOutletReport } from "./outlet-diagnostics.js";
+import { runNrDiagnostics, formatNrReport } from "./nr-diagnostics.js";
 
 /**
  * Registry of available diagnostics
@@ -23,10 +24,15 @@ const DIAGNOSTICS = {
     description: "Detects legacy electrical outlet cuts with box and circular cuts",
     runner: runOutletDiagnostics,
     formatter: formatOutletReport
+  },
+  nr: {
+    name: "NR Operations",
+    description: "Validates NR (Nail Row) operations: control code, structural member positioning, and edge distances",
+    runner: runNrDiagnostics,
+    formatter: formatNrReport
   }
   // Future diagnostics can be added here:
   // paf: { ... },
-  // nails: { ... },
   // etc.
 };
 

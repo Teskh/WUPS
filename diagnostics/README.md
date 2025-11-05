@@ -30,6 +30,20 @@ Detects legacy electrical outlet cuts that need to be updated to the modern form
 - Includes a zoom button to focus on each detected outlet in the 3D view
 - Reports orientation (horizontal/vertical) for each outlet
 
+### NR Operations Diagnostics (`nr-diagnostics.js`)
+
+Validates NR (Nail Row) operations with three quality checks:
+
+1. **Control Code Check**: Verifies that the NR control code (gauge parameter) is 10
+2. **Structural Member Check**: Confirms that the NR is positioned over a structural member (stud, blocking, or plate) by checking bounding box containment
+3. **Edge Distance Check**: Verifies that the NR is at least 10mm from the nearest edge of the structural member it is nailing
+
+**Features:**
+- Automatically validates all NR operations in the model
+- Identifies the type of structural member (stud, plate, blocking) each NR is associated with
+- Reports specific edge distances and identifies which edge is closest
+- Provides detailed failure information for non-compliant nail rows
+
 ### Batch Outlet Modernizer (`batch-outlet-modernizer.html`)
 
 A standalone web application for batch processing WUP files to modernize legacy electrical outlets.
@@ -235,6 +249,13 @@ To test the diagnostics:
 4. Check the dimensional information is accurate
 5. Test the zoom button to focus on detected outlets in the 3D view
 
+**NR Operations Diagnostics:**
+1. Load `example.wup` or other files containing NR operations
+2. Run the NR diagnostics or all diagnostics
+3. Verify that control codes are validated correctly
+4. Check that structural member associations are identified
+5. Confirm edge distance calculations are accurate
+
 **General:**
 1. Test saving the report to a file
 2. Verify that the diagnostics panel UI works correctly
@@ -243,7 +264,7 @@ To test the diagnostics:
 
 Potential additions:
 - PAF routing diagnostics (depth, orientation, overlap checks)
-- Nail row diagnostics (spacing, coverage)
+- Additional nail row checks (spacing consistency, coverage analysis)
 - Structural integrity checks (stud spacing, blocking placement)
 - Material usage optimization
 - Visual indicators in the 3D view for failed checks
