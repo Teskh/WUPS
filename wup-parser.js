@@ -278,24 +278,29 @@ export function parseWup(wupText) {
       }
       case "PLI1":
       case "PLA1": {
-        if (numbers.length >= 6) {
-          const materialToken = extractFirstStringToken(body);
-          const rotation = numbers[6] ?? 0;
+        const panelParams = extractPanelParameters(body);
+        const panelNumbers = panelParams.numbers.length >= 6 ? panelParams.numbers : numbers;
+        if (panelNumbers.length >= 6) {
+          const materialToken = panelParams.materialToken ?? extractFirstStringToken(body);
+          const materialIndex = panelNumbers[5];
+          const zPosition = panelNumbers.length >= 7 ? panelNumbers[6] : null;
+          const rotationValue = panelNumbers.length >= 8 ? panelNumbers[7] : null;
           const faceDirection = command.startsWith("PLA") ? -1 : 1;
           const layer = faceDirection >= 0 ? "pli" : "pla";
           const panel = {
-            width: numbers[0],
-            height: numbers[1],
-            thickness: numbers[2],
-            x: numbers[3],
-            y: numbers[4],
-            offset: numbers[5] ?? 0,
-            rotation,
+            width: panelNumbers[0],
+            height: panelNumbers[1],
+            thickness: panelNumbers[2],
+            x: panelNumbers[3],
+            y: panelNumbers[4],
+            offset: Number.isFinite(zPosition) ? zPosition : null,
+            rotation: Number.isFinite(rotationValue) ? rotationValue : 0,
+            materialIndex: Number.isFinite(materialIndex) ? materialIndex : null,
             material: materialToken ?? null,
             faceDirection,
             layer,
             points: [],
-            source: numbers
+            source: [...panelNumbers]
           };
           model.sheathing.push(panel);
           currentPanel = panel;
@@ -642,6 +647,32 @@ function extractPlacementOffset(body) {
 function extractFirstStringToken(body) {
   const tokens = body.split(",").map(token => token.trim()).filter(Boolean);
   return tokens.find(token => !isNumericToken(token)) ?? null;
+}
+
+function splitStatementTokens(body) {
+  if (!body) {
+    return [];
+  }
+  return body
+    .split(",")
+    .map(token => token.replace(/[;]+$/g, "").trim())
+    .filter(token => token.length > 0);
+}
+
+function extractPanelParameters(body) {
+  const tokens = splitStatementTokens(body);
+  const numbers = [];
+  let materialToken = null;
+  for (const token of tokens) {
+    if (!materialToken && !isNumericToken(token)) {
+      materialToken = token;
+      continue;
+    }
+    if (isNumericToken(token)) {
+      numbers.push(Number(token));
+    }
+  }
+  return { numbers, materialToken };
 }
 
 function isNumericToken(token) {

@@ -140,6 +140,7 @@ export function createNailRowMesh(row, context) {
     offsets,
     wallThickness,
     wallSide,
+    sheathingSurfaces,
     layer: layerOverride
   } = context;
   if (!materials?.nailRow || !highlightMaterials?.nailRow || !nailMarkerGeometry) {
@@ -167,7 +168,7 @@ export function createNailRowMesh(row, context) {
   nailCount = Math.min(maxNails, nailCount);
 
   const direction = end.clone().sub(start);
-  const centerZ = computeNailRowZ(wallThickness, faceDir) * scale;
+  const centerZ = computeNailRowZ(wallThickness, faceDir, sheathingSurfaces) * scale;
 
   const diameterMm = Number.isFinite(row.gauge) && row.gauge > 0 ? row.gauge : 12;
   const headSizeMm = Math.max(diameterMm * 1.4, 8);
@@ -559,9 +560,15 @@ function computePanelZ(panel, wallThickness, wallSide = 1) {
     return 0;
   }
   const faceDir = resolvePanelFaceDirection(panel, wallSide);
+  const epsilon = 0.6;
+  if (Number.isFinite(panel?.offset)) {
+    const wallDir = wallSide >= 0 ? 1 : -1;
+    const centerGlobal = panel.offset + thickness / 2;
+    const centerRelative = (centerGlobal - wallThickness / 2) * wallDir;
+    return centerRelative + faceDir * epsilon;
+  }
   const halfWall = wallThickness / 2;
   const flushOffset = faceDir * (halfWall - thickness / 2);
-  const epsilon = 0.6;
   return flushOffset + faceDir * epsilon;
 }
 
@@ -581,11 +588,16 @@ function computeMemberCenterZ(element, wallThickness, wallSide, depthMm) {
   return interiorFace - clampedOffset - depthMm / 2;
 }
 
-function computeNailRowZ(wallThickness, faceDir) {
+function computeNailRowZ(wallThickness, faceDir, sheathingSurfaces) {
   const epsilon = 1.2;
-  const halfWall = wallThickness / 2;
+  let surfaceZ = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness);
+  if (!Number.isFinite(surfaceZ)) {
+    const halfWall = wallThickness / 2;
+    const dir = faceDir >= 0 ? 1 : -1;
+    surfaceZ = dir * halfWall;
+  }
   const dir = faceDir >= 0 ? 1 : -1;
-  return dir * (halfWall + epsilon);
+  return surfaceZ + dir * epsilon;
 }
 
 function resolvePanelFaceDirection(panel, wallSide) {

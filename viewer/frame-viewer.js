@@ -210,6 +210,7 @@ export class FrameViewer {
       wallThickness,
       wallSide
     );
+    this.sheathingSurfaces = sheathingSurfaces;
 
     const scale = calculateScale(wallWidth, wallHeight);
 
@@ -252,6 +253,7 @@ export class FrameViewer {
       offsets,
       wallThickness,
       wallSide,
+      sheathingSurfaces,
       plates: model.plates ?? []
     };
 
@@ -970,7 +972,11 @@ export class FrameViewer {
     const faceDir = resolveLayerFaceDirectionForViewer(layer, this.wallSide ?? 1);
     const wallThickness = Number.isFinite(this.wallThickness) ? this.wallThickness : 90;
     const scale = this.cachedDimensions?.scale || 1;
-    focusPoint.z = computeNailRowZForViewer(wallThickness, faceDir) * scale;
+    focusPoint.z = computeNailRowZForViewer(
+      wallThickness,
+      faceDir,
+      this.sheathingSurfaces
+    ) * scale;
 
     this.zoomToWorldPosition(focusPoint);
 
@@ -1116,12 +1122,20 @@ function resolveLayerFaceDirectionForViewer(layer, wallSide) {
   return layer.toLowerCase() === "pla" ? -wallDir : wallDir;
 }
 
-function computeNailRowZForViewer(wallThickness, faceDir) {
+function computeNailRowZForViewer(wallThickness, faceDir, sheathingSurfaces) {
   const thickness = Number.isFinite(wallThickness) ? wallThickness : 90;
-  const halfWall = thickness / 2;
-  const dir = faceDir >= 0 ? 1 : -1;
   const epsilon = 1.2;
-  return dir * (halfWall + epsilon);
+  const dir = faceDir >= 0 ? 1 : -1;
+  let surfaceZ = null;
+  if (faceDir >= 0) {
+    surfaceZ = sheathingSurfaces?.positive ?? null;
+  } else {
+    surfaceZ = sheathingSurfaces?.negative ?? null;
+  }
+  if (!Number.isFinite(surfaceZ)) {
+    surfaceZ = dir * (thickness / 2);
+  }
+  return surfaceZ + dir * epsilon;
 }
 
 function resolvePickTarget(object) {

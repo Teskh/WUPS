@@ -141,9 +141,10 @@ export function formatTooltipContent(object) {
       const label = panel.material ? `Sheathing (${panel.material})` : "Sheathing";
       const dims = `${formatNumber(panel.width)} × ${formatNumber(panel.height)} × ${formatNumber(panel.thickness)} mm`;
       const originText = `@ (${formatNumber(panel.x)}, ${formatNumber(panel.y)})`;
-      const offsetText = Number.isFinite(panel.offset) ? `offset ${formatNumber(panel.offset)} mm` : null;
-      const rotationText = Number.isFinite(panel.rotation) ? `${formatNumber(panel.rotation)}°` : null;
-      const extras = [offsetText, rotationText].filter(Boolean).join(", ");
+      const positionText = Number.isFinite(panel.offset) ? `z ${formatNumber(panel.offset)} mm` : null;
+      const rotationText = Number.isFinite(panel.rotation) && Math.abs(panel.rotation) > 1e-4 ? `${formatNumber(panel.rotation)}°` : null;
+      const materialIndexText = Number.isFinite(panel.materialIndex) ? `material ${panel.materialIndex}` : null;
+      const extras = [positionText, materialIndexText, rotationText].filter(Boolean).join(", ");
       return extras ? `${label} — ${dims} ${originText} — ${extras}` : `${label} — ${dims} ${originText}`;
     }
     case "nailRow": {
