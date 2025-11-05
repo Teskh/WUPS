@@ -282,20 +282,50 @@ export function createPafParameterMenu({ container, onViewSource } = {}) {
 
     let radiusText = "n/a";
     let radiusTooltip = "No radius-based expansion applied.";
+    const orientation = adjustment?.orientation ?? null;
+
     if (adjustment?.mode === "diameter") {
       radiusText = formatMillimetres(DEFAULT_TOOL_RADIUS * 2, 1);
-      radiusTooltip = "Adds 16 mm per side (32 mm total) because hundreds digit is 2 (tool offset left).";
+      if (controlInfo?.radiusSide === "left") {
+        radiusTooltip =
+          orientation !== null && orientation > 0
+            ? "Adds 16 mm per side (32 mm total) because left compensation on a counter-clockwise contour expands the cut."
+            : "Adds 16 mm per side (32 mm total) because hundreds digit is 2 (tool offset left).";
+      } else if (controlInfo?.radiusSide === "right") {
+        radiusTooltip =
+          orientation !== null && orientation < 0
+            ? "Adds 16 mm per side (32 mm total) because right compensation on a clockwise contour expands the cut."
+            : "Adds 16 mm per side (32 mm total) due to right-side tool compensation.";
+      } else {
+        radiusTooltip = "Adds 16 mm per side (32 mm total) because the tool path expands the programmed contour.";
+      }
     } else if (adjustment?.mode === "radius") {
       radiusText = formatMillimetres(DEFAULT_TOOL_RADIUS, 1);
       radiusTooltip = "Adds 8 mm per side (16 mm total) because hundreds digit is 3 (no compensation).";
     } else if (adjustment?.mode === "internal") {
       radiusText = "n/a";
-      if (controlInfo?.radiusSide === "left" && segment?.kind === "polygon") {
-        radiusTooltip =
-          "Hundreds digit is 2, but the polygon runs clockwise so the offset remains inside the programmed contour.";
-      } else if (controlInfo?.radiusSide === "left" && adjustment?.orientation === null) {
-        radiusTooltip =
-          "Hundreds digit is 2, but the winding is unknown (e.g. MP circle) so the offset is assumed to stay inside the contour.";
+      if (controlInfo?.radiusSide === "left") {
+        if (orientation === null) {
+          radiusTooltip =
+            "Hundreds digit is 2, but the winding is unknown (e.g. MP circle) so the offset is assumed to stay inside the contour.";
+        } else if (orientation > 0) {
+          radiusTooltip =
+            "Hundreds digit is 2, yet this open path does not expand because the contour is not closed—offset stays on the tool centre.";
+        } else {
+          radiusTooltip =
+            "Hundreds digit is 2, but a clockwise contour keeps the offset inside the programmed shape.";
+        }
+      } else if (controlInfo?.radiusSide === "right") {
+        if (orientation === null) {
+          radiusTooltip =
+            "Hundreds digit is 1, but the winding is unknown so the offset is assumed to stay inside the contour.";
+        } else if (orientation < 0) {
+          radiusTooltip =
+            "Hundreds digit is 1, yet this open path does not expand because the contour is not closed—offset stays on the tool centre.";
+        } else {
+          radiusTooltip =
+            "Hundreds digit is 1, and a counter-clockwise contour keeps the routing inside the programmed shape.";
+        }
       } else {
         radiusTooltip = "Hundreds digit is 1, so the routing stays inside the contour and no expansion is used.";
       }

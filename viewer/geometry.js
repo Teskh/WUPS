@@ -1164,7 +1164,9 @@ function createPafSegmentMesh(segment, routing, context) {
   mesh.userData.originalMaterial = materials.pafRouting;
   const controlCode = extractControlCode(segment);
   const controlInfo = parseControlCode(controlCode);
-  const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
+  const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS, {
+    winding: Number.isFinite(segment?.winding) ? segment.winding : null
+  });
   mesh.userData.controlCode = controlCode;
   mesh.userData.controlInfo = controlInfo;
   mesh.userData.footprintAdjustment = adjustment;

@@ -291,12 +291,27 @@ export function resolveFootprintAdjustment(controlInfo, toolRadius = DEFAULT_TOO
   const orientation = resolveOrientationFromOptions(options);
 
   if (hundreds === 1) {
+    const expandsOutward = orientation !== null && orientation < 0;
+    if (expandsOutward) {
+      return {
+        expansion: toolRadius * 4,
+        mode: "diameter",
+        applied: true,
+        orientation,
+        description:
+          "Hundreds digit = 1 (right compensation) with clockwise winding — add 16 mm per side (32 mm overall)."
+      };
+    }
+    const reason =
+      orientation === null
+        ? "Hundreds digit = 1 (right compensation) but the path winding is unknown — assuming the offset remains inside the contour."
+        : "Hundreds digit = 1 (right compensation) with counter-clockwise routing — offset stays inside the programmed contour.";
     return {
       expansion: 0,
       mode: "internal",
       applied: false,
       orientation,
-      description: "Hundreds digit = 1 (right compensation) — contour remains inside, so no expansion."
+      description: reason
     };
   }
   if (hundreds === 2) {

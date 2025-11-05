@@ -251,9 +251,14 @@ export function parseWup(wupText) {
           const position = { x: numbers[0], y: numbers[1] };
           const radiusValue = numbers[2] ?? null;
           const depthRaw = numbers[3] ?? null;
+          const radiusSign =
+            Number.isFinite(radiusValue) && Math.abs(radiusValue) > 1e-6 ? Math.sign(radiusValue) : null;
           const segment = {
             position,
             radius: Number.isFinite(radiusValue) ? Math.abs(radiusValue) : null,
+            radiusRaw: Number.isFinite(radiusValue) ? radiusValue : null,
+            clockwise: radiusSign === null ? null : radiusSign > 0,
+            winding: radiusSign === null ? null : radiusSign > 0 ? -1 : 1,
             depth: Number.isFinite(depthRaw) ? Math.abs(depthRaw) : null,
             depthRaw: Number.isFinite(depthRaw) ? depthRaw : null,
             orientation: numbers[4] ?? null,
