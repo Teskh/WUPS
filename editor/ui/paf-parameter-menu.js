@@ -229,7 +229,9 @@ export function createPafParameterMenu({ container, onViewSource } = {}) {
     const segment = pafObject.userData?.segment ?? null;
     const controlCode = extractControlCode(segment);
     const controlInfo = parseControlCode(controlCode);
-    const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
+    const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS, {
+      points: segment?.kind === "polygon" ? segment.points : null
+    });
 
     const refPlane = describeReferencePlane(routing?.tool);
     const trimMode = describeTrimMode(routing?.face);
@@ -282,13 +284,21 @@ export function createPafParameterMenu({ container, onViewSource } = {}) {
     let radiusTooltip = "No radius-based expansion applied.";
     if (adjustment?.mode === "diameter") {
       radiusText = formatMillimetres(DEFAULT_TOOL_RADIUS * 2, 1);
-      radiusTooltip = "Adds 16 mm per side (32 mm total) because hundreds digit is 1 (tool offset left).";
+      radiusTooltip = "Adds 16 mm per side (32 mm total) because hundreds digit is 2 (tool offset left).";
     } else if (adjustment?.mode === "radius") {
       radiusText = formatMillimetres(DEFAULT_TOOL_RADIUS, 1);
       radiusTooltip = "Adds 8 mm per side (16 mm total) because hundreds digit is 3 (no compensation).";
     } else if (adjustment?.mode === "internal") {
       radiusText = "n/a";
-      radiusTooltip = "Hundreds digit is 2, so the routing stays inside the contour and no expansion is used.";
+      if (controlInfo?.radiusSide === "left" && segment?.kind === "polygon") {
+        radiusTooltip =
+          "Hundreds digit is 2, but the polygon runs clockwise so the offset remains inside the programmed contour.";
+      } else if (controlInfo?.radiusSide === "left" && adjustment?.orientation === null) {
+        radiusTooltip =
+          "Hundreds digit is 2, but the winding is unknown (e.g. MP circle) so the offset is assumed to stay inside the contour.";
+      } else {
+        radiusTooltip = "Hundreds digit is 1, so the routing stays inside the contour and no expansion is used.";
+      }
     }
     updateRow(rows.get("toolRadius"), {
       text: radiusText,
@@ -297,7 +307,7 @@ export function createPafParameterMenu({ container, onViewSource } = {}) {
 
     let footprint = null;
     if (segment?.kind === "polygon") {
-      footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS);
+      footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS, { adjustment });
     } else if (segment?.radius) {
       footprint = computeCircularFootprint(segment, controlInfo);
     } else if (pafObject.userData?.cutoutFootprint) {

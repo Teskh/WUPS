@@ -47,14 +47,14 @@ const RADIUS_MODE_MAP = {
     side: "auto"
   },
   1: {
-    label: "Left compensation",
-    description: "Offset the tool to the left of the processing direction so waste stays on the cutter side (1xx).",
-    side: "left"
+    label: "Right compensation",
+    description: "Offset the tool to the right of the processing direction so waste is opposite the cutter (1xx).",
+    side: "right"
   },
   2: {
-    label: "Right compensation",
-    description: "Offset the tool to the right of the processing direction so waste is opposite the cutter (2xx).",
-    side: "right"
+    label: "Left compensation",
+    description: "Offset the tool to the left of the processing direction so waste stays on the cutter side (2xx).",
+    side: "left"
   },
   3: {
     label: "No compensation",
@@ -156,9 +156,9 @@ export function parseControlCode(rawCode) {
 
   const compensationMode =
     digits.hundreds === 1
-      ? "left"
+      ? "right"
       : digits.hundreds === 2
-        ? "right"
+        ? "left"
         : digits.hundreds === 3
           ? "center"
           : "auto";
@@ -231,7 +231,53 @@ export function extractControlCode(segment) {
   return null;
 }
 
-export function resolveFootprintAdjustment(controlInfo, toolRadius = DEFAULT_TOOL_RADIUS) {
+function computeSignedArea(points = []) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return 0;
+  }
+  let area = 0;
+  let validCount = 0;
+  const length = points.length;
+  for (let i = 0; i < length; i += 1) {
+    const current = points[i];
+    const next = points[(i + 1) % length];
+    if (
+      !Number.isFinite(current?.x) ||
+      !Number.isFinite(current?.y) ||
+      !Number.isFinite(next?.x) ||
+      !Number.isFinite(next?.y)
+    ) {
+      continue;
+    }
+    area += current.x * next.y - next.x * current.y;
+    validCount += 1;
+  }
+  if (validCount < 3) {
+    return 0;
+  }
+  return area / 2;
+}
+
+function resolveOrientationFromOptions(options) {
+  if (!options) {
+    return null;
+  }
+  if (typeof options.orientation === "number" && Math.abs(options.orientation) > 1e-6) {
+    return options.orientation > 0 ? 1 : -1;
+  }
+  if (typeof options.winding === "number" && Math.abs(options.winding) > 1e-6) {
+    return options.winding > 0 ? 1 : -1;
+  }
+  if (Array.isArray(options.points)) {
+    const signedArea = computeSignedArea(options.points);
+    if (Math.abs(signedArea) > 1e-4) {
+      return signedArea > 0 ? 1 : -1;
+    }
+  }
+  return null;
+}
+
+export function resolveFootprintAdjustment(controlInfo, toolRadius = DEFAULT_TOOL_RADIUS, options = {}) {
   const info =
     controlInfo && typeof controlInfo === "object" && controlInfo.digits
       ? controlInfo
@@ -242,20 +288,38 @@ export function resolveFootprintAdjustment(controlInfo, toolRadius = DEFAULT_TOO
   }
 
   const hundreds = digits.hundreds;
+  const orientation = resolveOrientationFromOptions(options);
+
   if (hundreds === 1) {
-    return {
-      expansion: toolRadius * 4,
-      mode: "diameter",
-      applied: true,
-      description: "Hundreds digit = 1 (left compensation) — add 16 mm per side (32 mm overall)."
-    };
-  }
-  if (hundreds === 2) {
     return {
       expansion: 0,
       mode: "internal",
       applied: false,
-      description: "Hundreds digit = 2 (right compensation) — contour remains inside, so no expansion."
+      orientation,
+      description: "Hundreds digit = 1 (right compensation) — contour remains inside, so no expansion."
+    };
+  }
+  if (hundreds === 2) {
+    const expandsOutward = orientation !== null && orientation > 0;
+    if (expandsOutward) {
+      return {
+        expansion: toolRadius * 4,
+        mode: "diameter",
+        applied: true,
+        orientation,
+        description: "Hundreds digit = 2 (left compensation) — add 16 mm per side (32 mm overall)."
+      };
+    }
+    const reason =
+      orientation === null
+        ? "Hundreds digit = 2 (left compensation) but the path winding is unknown — assuming the offset remains inside the programmed contour."
+        : "Hundreds digit = 2 (left compensation) with clockwise routing — offset stays inside the programmed contour.";
+    return {
+      expansion: 0,
+      mode: "internal",
+      applied: false,
+      orientation,
+      description: reason
     };
   }
   if (hundreds === 3) {
@@ -263,6 +327,7 @@ export function resolveFootprintAdjustment(controlInfo, toolRadius = DEFAULT_TOO
       expansion: toolRadius * 2,
       mode: "radius",
       applied: true,
+      orientation,
       description: "Hundreds digit = 3 (no compensation) — add 8 mm per side (16 mm overall)."
     };
   }
@@ -270,11 +335,12 @@ export function resolveFootprintAdjustment(controlInfo, toolRadius = DEFAULT_TOO
     expansion: 0,
     mode: "auto",
     applied: false,
+    orientation,
     description: "No explicit compensation digit supplied — leaving footprint unchanged."
   };
 }
 
-export function computeCutoutFootprint(points = [], controlInfo, toolRadius = DEFAULT_TOOL_RADIUS) {
+export function computeCutoutFootprint(points = [], controlInfo, toolRadius = DEFAULT_TOOL_RADIUS, options = {}) {
   if (!Array.isArray(points) || points.length === 0) {
     return null;
   }
@@ -298,8 +364,14 @@ export function computeCutoutFootprint(points = [], controlInfo, toolRadius = DE
   }
   const baseWidth = maxX - minX;
   const baseHeight = maxY - minY;
-  const adjustment = resolveFootprintAdjustment(controlInfo, toolRadius);
-  const expansion = adjustment?.expansion ?? 0;
+  const adjustmentOptions = { ...(options?.adjustmentOptions ?? {}) };
+  if (!adjustmentOptions.points && Array.isArray(points)) {
+    adjustmentOptions.points = points;
+  }
+  const adjustment =
+    options?.adjustment ?? resolveFootprintAdjustment(controlInfo, toolRadius, adjustmentOptions);
+  const expansion =
+    options?.expansionOverride ?? (adjustment?.expansion ?? 0);
   return {
     baseWidth,
     baseHeight,

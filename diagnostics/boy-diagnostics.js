@@ -2,10 +2,9 @@
  * BOY (Blind Operation Y-axis) Diagnostics
  *
  * Validates BOY operations against quality standards:
- * 1. Direction: BOY must face inward toward the element
- * 2. Wall Thickness Edge Distance: BOY outer edge must be at least 10mm from outer/inner faces of wall (Z-axis)
- * 3. Stud Distance: BOY outer edge must be at least 10mm from nearest stud (QS) edge
- * 4. Diameter: BOY diameter must be 30mm
+ * 1. Wall Thickness Edge Distance: BOY outer edge must be at least 10mm from outer/inner faces of wall (Z-axis)
+ * 2. Stud Distance: BOY outer edge must be at least 10mm from nearest stud (QS) edge
+ * 3. Diameter: BOY diameter must be 30mm
  */
 
 export function runBoyDiagnostics(model) {
@@ -36,11 +35,6 @@ export function runBoyDiagnostics(model) {
     },
     checks: [
       {
-        name: "Direction Check",
-        description: "BOY faces inward toward the element",
-        results: []
-      },
-      {
         name: "Wall Thickness Edge Distance Check",
         description: "BOY outer edge is at least 10mm from outer/inner faces of wall (Z-axis through-thickness)",
         results: []
@@ -63,22 +57,10 @@ export function runBoyDiagnostics(model) {
 
     // Use targetElement if available (from parser), otherwise find it
     const associatedElement = boy.targetElement || findAssociatedElement(boy, framingElements, wallThickness, wallSide, wallHeight);
-    const targetRole = boy.targetRole || (associatedElement ? inferPlateRole(associatedElement, wallHeight) : null);
 
-    // Check 1: Direction (faces inward)
-    const directionResult = checkDirection(boy, associatedElement, targetRole, wallThickness, wallSide, wallHeight);
-    results.checks[0].results.push({
-      id: boyId,
-      boy,
-      element: associatedElement,
-      passed: directionResult.passed,
-      message: directionResult.message,
-      details: directionResult.details
-    });
-
-    // Check 2: Wall Thickness Edge Distance (>= 10mm from outer/inner face)
+    // Check 1: Wall Thickness Edge Distance (>= 10mm from outer/inner face)
     const edgeResult = checkEdgeDistance(boy, associatedElement, wallThickness, wallSide);
-    results.checks[1].results.push({
+    results.checks[0].results.push({
       id: boyId,
       boy,
       element: associatedElement,
@@ -87,9 +69,9 @@ export function runBoyDiagnostics(model) {
       details: edgeResult.details
     });
 
-    // Check 3: Stud Distance (>= 10mm from nearest stud edge)
+    // Check 2: Stud Distance (>= 10mm from nearest stud edge)
     const studResult = checkStudDistance(boy, studs);
-    results.checks[2].results.push({
+    results.checks[1].results.push({
       id: boyId,
       boy,
       element: associatedElement,
@@ -98,9 +80,9 @@ export function runBoyDiagnostics(model) {
       details: studResult.details
     });
 
-    // Check 4: Diameter (should be 30mm)
+    // Check 3: Diameter (should be 30mm)
     const diameterResult = checkDiameter(boy);
-    results.checks[3].results.push({
+    results.checks[2].results.push({
       id: boyId,
       boy,
       element: associatedElement,
@@ -110,7 +92,7 @@ export function runBoyDiagnostics(model) {
     });
 
     // Update summary
-    const allChecksPassed = directionResult.passed && edgeResult.passed && studResult.passed && diameterResult.passed;
+    const allChecksPassed = edgeResult.passed && studResult.passed && diameterResult.passed;
     if (allChecksPassed) {
       results.summary.passed++;
     } else {
@@ -200,59 +182,7 @@ function determineDirection(boy, wallThickness, wallSide) {
 }
 
 /**
- * Check 1: BOY faces inward toward the element
- */
-function checkDirection(boy, element, targetRole, wallThickness, wallSide, wallHeight) {
-  const direction = determineDirection(boy, wallThickness, wallSide);
-  const directionLabel = direction >= 0 ? "+Y (upward)" : "-Y (downward)";
-
-  if (!element || !targetRole) {
-    return {
-      passed: false,
-      message: `No associated element found`,
-      details: {
-        direction: directionLabel,
-        depth: boy.depth
-      }
-    };
-  }
-
-  // BOY drilling logic:
-  // - Negative depth (-Y): drills downward, correct for TOP plate
-  // - Positive depth (+Y): drills upward, correct for BOTTOM plate
-  const isTopPlate = targetRole === 'top';
-  const expectedDirection = isTopPlate ? -1 : 1;
-  const passed = direction === expectedDirection;
-
-  return {
-    passed,
-    message: passed
-      ? `Correct (${directionLabel} on ${targetRole} plate)`
-      : `Incorrect (${directionLabel} on ${targetRole} plate, expected ${expectedDirection >= 0 ? '+Y (upward)' : '-Y (downward)'})`,
-    details: {
-      direction: directionLabel,
-      targetRole,
-      expectedDirection: expectedDirection >= 0 ? '+Y (upward)' : '-Y (downward)',
-      depth: boy.depth,
-      plateY: element.y.toFixed(1)
-    }
-  };
-}
-
-/**
- * Infer plate role based on Y position
- */
-function inferPlateRole(element, wallHeight) {
-  if (!element || !Number.isFinite(element.y)) {
-    return null;
-  }
-  const elementCenterY = element.y + (element.height || 0) / 2;
-  const wallCenterY = wallHeight / 2;
-  return elementCenterY > wallCenterY ? 'top' : 'bottom';
-}
-
-/**
- * Check 2: BOY outer edge is at least 10mm from outer/inner faces of wall (Z-axis)
+ * Check 1: BOY outer edge is at least 10mm from outer/inner faces of wall (Z-axis)
  */
 function checkEdgeDistance(boy, element, wallThickness, wallSide) {
   const MIN_EDGE_DISTANCE = 10; // mm

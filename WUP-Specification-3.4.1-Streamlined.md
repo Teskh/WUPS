@@ -523,8 +523,8 @@ The following control codes are used to control the trimming unit.
 | 10 | Overcutting trimming line |
 | 20 | Undercutting trimming line |
 | 30...90 | Blocked |
-| 100 | Tool radius correction "left" - Workpiece is located to the right of the processing line |
-| 200 | Tool radius correction "right" - Workpiece is located to the left of the processing line |
+| 100 | Tool radius correction "right" - Workpiece is located to the left of the processing line |
+| 200 | Tool radius correction "left" - Workpiece is located to the right of the processing line |
 | 300 | No tool radius offset |
 | 400...900 | Blocked |
 | 1000 | Synchronous rotation |
@@ -561,17 +561,19 @@ The hundreds position in the control code determines the tool radius correction.
 
 With control code 300, no differentiation between material waste and a required part is possible.
 
-**Tool radius correction in the processing direction to the left (control code 100)**
+**Tool radius correction in the processing direction to the right (control code 100)**
+
+[Diagram showing tool offset to right of processing direction]
+
+The material waste is located opposite the chipping processing unit.
+
+**Tool radius correction in the processing direction to the left (control code 200)**
 
 [Diagram showing tool offset to left of processing direction]
 
 The material waste is located on the side of the chipping processing unit.
 
-**Tool radius correction in the processing direction to the right (control code 200)**
-
-[Diagram showing tool offset to right of processing direction]
-
-The material waste is located on the side of the chipping processing unit.
+**Clockwise vs. counterclockwise polygons:** For closed PAF contours, the polygon winding determines whether a left-hand correction extends the machined footprint. A counter-clockwise toolpath places the left offset outside the programmed contour (expanding the notch), while a clockwise loop keeps the tool inside the contour even with code 2xx.
 
 #### 5.1.4 Synchronous and reverse rotation
 

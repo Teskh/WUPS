@@ -1381,7 +1381,7 @@ function createPafPolygonMesh(segment, routing, context) {
   // Parse control code to determine rendering style
   const controlCode = extractControlCode(segment);
   const controlInfo = parseControlCode(controlCode);
-  const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
+  const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS, { points: deduped });
 
   // Determine which material to use based on edge mode (tens digit)
   const edgeMode = controlInfo?.edgeMode?.code ?? 0;
@@ -1418,7 +1418,9 @@ function createPafPolygonMesh(segment, routing, context) {
   line.userData.controlInfo = controlInfo;
   line.userData.footprintAdjustment = adjustment;
   line.userData.assumedToolRadius = adjustment?.applied ? DEFAULT_TOOL_RADIUS : null;
-  const footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS);
+  const footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS, {
+    adjustment
+  });
   if (footprint) {
     line.userData.cutoutFootprint = footprint;
   }

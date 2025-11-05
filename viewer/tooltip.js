@@ -188,7 +188,9 @@ export function formatTooltipContent(object) {
       }
       const controlCode = extractControlCode(segment);
       const controlInfo = parseControlCode(controlCode);
-      const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS);
+      const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS, {
+        points: Array.isArray(segment?.points) ? segment.points : null
+      });
       if (Number.isFinite(controlCode)) {
         toolParts.push(`code ${controlCode}`);
       }
@@ -206,7 +208,9 @@ export function formatTooltipContent(object) {
       const detailParts = [`@ (${formatNumber(basePoint.x)}, ${formatNumber(basePoint.y)})`];
       if (segment.kind === "polygon" && Array.isArray(segment.points) && segment.points.length >= 3) {
         const baseFootprint = computeFootprintSize(segment.points);
-        const effectiveFootprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS);
+        const effectiveFootprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS, {
+          adjustment
+        });
         if (effectiveFootprint && Number.isFinite(effectiveFootprint.width) && Number.isFinite(effectiveFootprint.height)) {
           const sizeText = `${formatNumber(effectiveFootprint.width)} × ${formatNumber(effectiveFootprint.height)} mm`;
           const fragments = [`footprint ${sizeText}`];

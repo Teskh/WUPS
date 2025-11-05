@@ -6,12 +6,11 @@ This folder contains diagnostic scripts for validating WUP models against qualit
 
 ### BOY Diagnostics (`boy-diagnostics.js`)
 
-Validates BOY (Blind Operation Y-axis) drilling operations with four checks:
+Validates BOY (Blind Operation Y-axis) drilling operations with three checks:
 
-1. **Direction Check**: Ensures BOY operations face inward toward the element (plate/stud/joist)
-2. **Wall Thickness Edge Distance Check**: Verifies that the BOY outer edge is at least 10mm from the outer/inner faces of the wall (Z-axis through-thickness)
-3. **Stud Distance Check**: Verifies that the BOY outer edge is at least 10mm from the nearest stud (QS) edge
-4. **Diameter Check**: Confirms that the BOY diameter is 30mm (within tolerance)
+1. **Wall Thickness Edge Distance Check**: Verifies that the BOY outer edge is at least 10mm from the outer/inner faces of the wall (Z-axis through-thickness)
+2. **Stud Distance Check**: Verifies that the BOY outer edge is at least 10mm from the nearest stud (QS) edge
+3. **Diameter Check**: Confirms that the BOY diameter is 30mm (within tolerance)
 
 ### Electrical Outlet Diagnostics (`outlet-diagnostics.js`)
 
@@ -192,14 +191,6 @@ To add a new diagnostic:
    ```
 
 ## BOY Diagnostic Details
-
-### Direction Check
-
-BOY operations should face inward toward the element they're associated with:
-- Bottom elements (plates, studs at lower Y positions): Should use +Y direction
-- Top elements (plates, studs at higher Y positions): Should use -Y direction
-
-The direction is determined by the sign of the `depth` parameter in the BOY command.
 
 ### Wall Thickness Edge Distance Check
 
