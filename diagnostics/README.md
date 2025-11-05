@@ -31,6 +31,34 @@ Detects legacy electrical outlet cuts that need to be updated to the modern form
 - Includes a zoom button to focus on each detected outlet in the 3D view
 - Reports orientation (horizontal/vertical) for each outlet
 
+### Batch Outlet Modernizer (`batch-outlet-modernizer.html`)
+
+A standalone web application for batch processing WUP files to modernize legacy electrical outlets.
+
+**Features:**
+- Process single WUP files or entire directories
+- Automatically detects all legacy outlets in each file
+- Replaces legacy outlets with modern format using the standard template
+- Preserves all routing metadata (tool, face, passes, layer)
+- Downloads modified files individually
+- Generates detailed processing reports
+- Real-time progress tracking
+- Summary statistics (files processed, outlets modernized, etc.)
+
+**Usage:**
+1. Open `diagnostics/batch-outlet-modernizer.html` in a web browser
+2. Select either a single .wup file or a directory containing multiple .wup files
+3. Click "Process Files"
+4. Review the results and download modified files or the report
+
+**Technical Details:**
+- Uses `outlet-diagnostics.js` to detect legacy outlets
+- Uses `outlet-modernizer.js` to create modern outlet routings
+- Properly maintains WUP file structure and statement ordering
+- Handles both horizontal and vertical outlet orientations
+- Processes outlets sequentially, re-parsing after each replacement to maintain data integrity
+- Uses the same replacement algorithm as the interactive version for consistency
+
 ## Usage
 
 ### Via UI
@@ -87,9 +115,14 @@ saveDiagnosticResults(allResults);
 
 - **`boy-diagnostics.js`**: BOY-specific diagnostic logic
 - **`outlet-diagnostics.js`**: Electrical outlet diagnostic logic
+- **`outlet-modernizer.js`**: Creates modern outlet routing from template
 - **`diagnostic-runner.js`**: Manages and executes all diagnostics
 - **`diagnostics-ui.js`**: UI component for interactive diagnostics
 - **`diagnostics-styles.css`**: Styling for the diagnostics panel
+- **`batch-outlet-modernizer.html`**: Standalone batch processing tool (HTML)
+- **`batch-outlet-modernizer.js`**: Batch processing logic
+- **`batch-outlet-modernizer.css`**: Styling for batch processor UI
+- **`test-batch-modernizer.js`**: Node.js test script for batch modernizer
 
 ### Data Structure
 

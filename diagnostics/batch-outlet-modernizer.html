@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Batch Outlet Modernizer</title>
+  <link rel="stylesheet" href="batch-outlet-modernizer.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Batch Outlet Modernizer</h1>
+      <p class="subtitle">Transform legacy electrical outlets to modern format</p>
+    </header>
+
+    <main>
+      <section class="input-section">
+        <h2>Select Files</h2>
+        <div class="input-options">
+          <div class="input-group">
+            <label for="fileInput">
+              <input type="radio" name="inputType" id="singleFileRadio" value="single" checked>
+              Single WUP File
+            </label>
+            <input
+              type="file"
+              id="fileInput"
+              accept=".wup"
+              disabled
+            >
+          </div>
+
+          <div class="input-group">
+            <label for="directoryInput">
+              <input type="radio" name="inputType" id="directoryRadio" value="directory">
+              Directory (filters .wup files only)
+            </label>
+            <input
+              type="file"
+              id="directoryInput"
+              webkitdirectory
+              directory
+              multiple
+              disabled
+            >
+            <p class="input-hint">Note: Browser will show all files, but only .wup files will be processed</p>
+          </div>
+        </div>
+
+        <div id="selectionInfo" class="selection-info hidden"></div>
+
+        <button id="processButton" type="button" disabled>Process Files</button>
+      </section>
+
+      <section class="progress-section hidden" id="progressSection">
+        <h2>Processing</h2>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <p class="progress-text" id="progressText">0 / 0 files processed</p>
+      </section>
+
+      <section class="results-section hidden" id="resultsSection">
+        <h2>Results</h2>
+        <div class="summary" id="summary"></div>
+        <div class="file-results" id="fileResults"></div>
+        <div class="actions">
+          <button id="downloadAllButton" type="button">Download All Modified Files</button>
+          <button id="downloadReportButton" type="button">Download Report</button>
+          <button id="resetButton" type="button">Process More Files</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Part of the WUP Diagnostics Suite</p>
+    </footer>
+  </div>
+
+  <script type="module" src="batch-outlet-modernizer.js"></script>
+</body>
+</html>
