@@ -338,10 +338,19 @@ function createCheckSection(check) {
     const checkbox = result.passed ? "✓" : "✗";
     const statusClass = result.passed ? "check-pass" : "check-fail";
 
-    // Add zoom button for items with position data (BOY operations or outlets)
+    // Add zoom button for items with position data (BOY operations, NR, or outlets)
     let zoomButton = '';
     if (!result.passed && result.boy) {
       zoomButton = `<button class="zoom-to-error" data-boy-x="${result.boy.x}" data-boy-z="${result.boy.z}" title="Zoom to this BOY">🔍</button>`;
+    } else if (!result.passed && result.nr) {
+      const nr = result.nr;
+      const editorId = typeof nr.__editorId === "number" ? nr.__editorId : "";
+      const layer = typeof nr.layer === "string" ? nr.layer : "";
+      const startX = Number.isFinite(nr.start?.x) ? nr.start.x : "";
+      const startY = Number.isFinite(nr.start?.y) ? nr.start.y : "";
+      const endX = Number.isFinite(nr.end?.x) ? nr.end.x : "";
+      const endY = Number.isFinite(nr.end?.y) ? nr.end.y : "";
+      zoomButton = `<button class="zoom-to-nr" data-nr-id="${editorId}" data-layer="${layer}" data-start-x="${startX}" data-start-y="${startY}" data-end-x="${endX}" data-end-y="${endY}" title="Zoom to this NR">🔍</button>`;
     } else if (result.position) {
       // For outlets or other items with position data
       zoomButton = `<button class="zoom-to-outlet" data-x="${result.position.x}" data-y="${result.position.y}" title="Zoom to this location">🔍</button>`;
@@ -389,7 +398,9 @@ function createCheckSection(check) {
 
       // Toggle details on click (but not on zoom button)
       item.querySelector(".result-summary").addEventListener("click", (e) => {
-        if (!e.target.classList.contains("zoom-to-error")) {
+        if (!e.target.classList.contains("zoom-to-error") &&
+            !e.target.classList.contains("zoom-to-nr") &&
+            !e.target.classList.contains("zoom-to-outlet")) {
           detailsDiv.classList.toggle("collapsed");
         }
       });
@@ -403,6 +414,26 @@ function createCheckSection(check) {
         const boyX = parseFloat(zoomBoyBtn.dataset.boyX);
         const boyZ = parseFloat(zoomBoyBtn.dataset.boyZ);
         zoomToBoy(boyX, boyZ);
+        hideDiagnostics();
+      });
+    }
+
+    const zoomNrBtn = item.querySelector(".zoom-to-nr");
+    if (zoomNrBtn) {
+      zoomNrBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const editorIdRaw = parseFloat(zoomNrBtn.dataset.nrId);
+        const startX = parseFloat(zoomNrBtn.dataset.startX);
+        const startY = parseFloat(zoomNrBtn.dataset.startY);
+        const endX = parseFloat(zoomNrBtn.dataset.endX);
+        const endY = parseFloat(zoomNrBtn.dataset.endY);
+        const detail = {
+          editorId: Number.isFinite(editorIdRaw) ? editorIdRaw : null,
+          start: Number.isFinite(startX) && Number.isFinite(startY) ? { x: startX, y: startY } : null,
+          end: Number.isFinite(endX) && Number.isFinite(endY) ? { x: endX, y: endY } : null,
+          layer: zoomNrBtn.dataset.layer || null
+        };
+        zoomToNailRow(detail);
         hideDiagnostics();
       });
     }
@@ -456,6 +487,24 @@ function zoomToBoy(boyX, boyZ) {
     document.dispatchEvent(
       new CustomEvent("diagnostics:zoomToBoy", {
         detail: { x: boyX, z: boyZ }
+      })
+    );
+  }
+}
+
+/**
+ * Zoom the 3D viewer to a specific nail row
+ */
+function zoomToNailRow(nrData) {
+  if (typeof document !== "undefined") {
+    document.dispatchEvent(
+      new CustomEvent("diagnostics:zoomToNailRow", {
+        detail: {
+          editorId: Number.isFinite(nrData?.editorId) ? nrData.editorId : null,
+          start: nrData?.start ?? null,
+          end: nrData?.end ?? null,
+          layer: nrData?.layer ?? null
+        }
       })
     );
   }

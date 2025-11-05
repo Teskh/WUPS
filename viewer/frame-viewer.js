@@ -35,10 +35,13 @@ export class FrameViewer {
 
     this.perspectiveFov = 36;
     this.wallDir = 1;
+    this.wallSide = 1;
+    this.wallThickness = 90;
     this.activeFace = "pli";
     this.projectionMode = "orthographic";
     this.camera = null;
     this.controls = null;
+    this.modelOffsets = null;
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x48505a, 0.85);
     this.scene.add(hemiLight);
@@ -200,6 +203,8 @@ export class FrameViewer {
     const wallThickness = model.wall?.thickness ?? 90;
     const wallSide = Number.isFinite(model.wall?.side) ? (model.wall.side >= 0 ? 1 : -1) : 1;
     this.wallDir = wallSide >= 0 ? 1 : -1;
+    this.wallSide = wallSide;
+    this.wallThickness = wallThickness;
     const sheathingSurfaces = estimateSheathingTopZ(
       model.sheathing ?? [],
       wallThickness,
@@ -238,6 +243,7 @@ export class FrameViewer {
     clearGroup(this.groups.plaPafRoutings);
 
     const offsets = { minX, minY, width: wallWidth, height: wallHeight };
+    this.modelOffsets = offsets;
     const baseContext = {
       materials: this.materials,
       highlightMaterials: this.highlightMaterials,
@@ -799,6 +805,22 @@ export class FrameViewer {
     return this.wallDir ?? 1;
   }
 
+  modelPointToWorld(point) {
+    if (!point || !this.modelOffsets) {
+      return null;
+    }
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      return null;
+    }
+    const { minX, minY, width, height } = this.modelOffsets;
+    const scale = this.cachedDimensions?.scale || 1;
+    const localX = point.x - minX;
+    const localY = point.y - minY;
+    const worldX = (localX - width / 2) * scale;
+    const worldY = (localY - height / 2) * scale;
+    return new THREE.Vector3(worldX, worldY, 0);
+  }
+
   requestRender() {
     this.needsRender = true;
   }
@@ -866,6 +888,95 @@ export class FrameViewer {
 
     // Highlight the BOY with pulsing effect
     this.highlightBoy(targetMesh);
+  }
+
+  zoomToNailRow(details) {
+    if (!details) {
+      return;
+    }
+
+    const tolerance = 1; // mm tolerance for matching start/end coordinates
+    const editorId = Number.isFinite(details.editorId) ? details.editorId : null;
+    const targetStart = details.start;
+    const targetEnd = details.end;
+
+    const groups = [
+      this.groups?.pliNailRows,
+      this.groups?.plaNailRows
+    ].filter(group => group);
+
+    let targetMesh = null;
+    let matchedRow = null;
+
+    const pointsMatch = (a, b) => {
+      if (!a || !b) {
+        return false;
+      }
+      return Math.abs(a.x - b.x) < tolerance && Math.abs(a.y - b.y) < tolerance;
+    };
+
+    for (const group of groups) {
+      for (const child of group.children) {
+        const row = child.userData?.row;
+        if (child.userData?.kind !== "nailRow" || !row) {
+          continue;
+        }
+
+        const rowId = Number.isFinite(row.__editorId) ? row.__editorId : null;
+        const idMatches = editorId !== null && rowId === editorId;
+        const coordinateMatches =
+          targetStart && targetEnd &&
+          row.start && row.end &&
+          ((pointsMatch(row.start, targetStart) && pointsMatch(row.end, targetEnd)) ||
+           (pointsMatch(row.start, targetEnd) && pointsMatch(row.end, targetStart)));
+
+        if (idMatches || coordinateMatches) {
+          targetMesh = child;
+          matchedRow = row;
+          break;
+        }
+      }
+      if (targetMesh) {
+        break;
+      }
+    }
+
+    const usableStart = matchedRow?.start ?? targetStart ?? null;
+    const usableEnd = matchedRow?.end ?? targetEnd ?? null;
+
+    const startWorld = this.modelPointToWorld(usableStart);
+    const endWorld = this.modelPointToWorld(usableEnd);
+
+    let focusPoint = null;
+    if (startWorld && endWorld) {
+      focusPoint = startWorld.clone().lerp(endWorld, 0.5);
+    } else if (startWorld) {
+      focusPoint = startWorld.clone();
+    } else if (endWorld) {
+      focusPoint = endWorld.clone();
+    } else if (targetMesh) {
+      focusPoint = new THREE.Vector3();
+      targetMesh.getWorldPosition(focusPoint);
+    }
+
+    if (!focusPoint) {
+      console.warn("Unable to determine focus point for nail row zoom.");
+      return;
+    }
+
+    const layer = typeof details.layer === "string" && details.layer
+      ? details.layer
+      : (matchedRow?.layer ?? "pli");
+    const faceDir = resolveLayerFaceDirectionForViewer(layer, this.wallSide ?? 1);
+    const wallThickness = Number.isFinite(this.wallThickness) ? this.wallThickness : 90;
+    const scale = this.cachedDimensions?.scale || 1;
+    focusPoint.z = computeNailRowZForViewer(wallThickness, faceDir) * scale;
+
+    this.zoomToWorldPosition(focusPoint);
+
+    if (targetMesh) {
+      this.highlightMesh(targetMesh);
+    }
   }
 
   zoomToPosition(x, y) {
@@ -995,6 +1106,22 @@ export class FrameViewer {
 
     pulse();
   }
+}
+
+function resolveLayerFaceDirectionForViewer(layer, wallSide) {
+  const wallDir = wallSide >= 0 ? 1 : -1;
+  if (typeof layer !== "string") {
+    return wallDir;
+  }
+  return layer.toLowerCase() === "pla" ? -wallDir : wallDir;
+}
+
+function computeNailRowZForViewer(wallThickness, faceDir) {
+  const thickness = Number.isFinite(wallThickness) ? wallThickness : 90;
+  const halfWall = thickness / 2;
+  const dir = faceDir >= 0 ? 1 : -1;
+  const epsilon = 1.2;
+  return dir * (halfWall + epsilon);
 }
 
 function resolvePickTarget(object) {
