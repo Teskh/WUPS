@@ -1340,47 +1340,57 @@ function createPafPolygonMesh(segment, routing, context) {
     .reduce((acc, pt) => acc.add(pt.clone()), new THREE.Vector2())
     .multiplyScalar(1 / worldPoints.length);
 
-  const shape = new THREE.Shape();
+  const shape = isClosedPath ? new THREE.Shape() : null;
   if (pathSegments && pathSegments.length > 0) {
     const firstSegment = pathSegments[0];
     const initialPoint = firstSegment?.from ?? deduped[0];
-    const initialWorld =
-      initialPoint && Number.isFinite(initialPoint.x) && Number.isFinite(initialPoint.y)
-        ? convertPointToWorld(initialPoint, offsets, scale)
-        : worldPoints[0];
-    shape.moveTo(initialWorld.x - centroid.x, initialWorld.y - centroid.y);
+    if (shape) {
+      const initialWorld =
+        initialPoint && Number.isFinite(initialPoint.x) && Number.isFinite(initialPoint.y)
+          ? convertPointToWorld(initialPoint, offsets, scale)
+          : worldPoints[0];
+      shape.moveTo(initialWorld.x - centroid.x, initialWorld.y - centroid.y);
+    }
     for (const pathSegment of pathSegments) {
       if (!pathSegment) {
         continue;
       }
       if (pathSegment.type === "line") {
-        const target = convertPointToWorld(pathSegment.to, offsets, scale);
-        shape.lineTo(target.x - centroid.x, target.y - centroid.y);
+        if (shape) {
+          const target = convertPointToWorld(pathSegment.to, offsets, scale);
+          shape.lineTo(target.x - centroid.x, target.y - centroid.y);
+        }
       } else if (pathSegment.type === "arc") {
-        const centerWorld = convertPointToWorld(pathSegment.center, offsets, scale);
-        const radiusWorld = Math.max(pathSegment.radius * scale, scale * 0.5);
-        shape.absarc(
-          centerWorld.x - centroid.x,
-          centerWorld.y - centroid.y,
-          radiusWorld,
-          pathSegment.startAngle,
-          pathSegment.endAngle,
-          Boolean(pathSegment.clockwise)
-        );
+        if (shape) {
+          const centerWorld = convertPointToWorld(pathSegment.center, offsets, scale);
+          const radiusWorld = Math.max(pathSegment.radius * scale, scale * 0.5);
+          shape.absarc(
+            centerWorld.x - centroid.x,
+            centerWorld.y - centroid.y,
+            radiusWorld,
+            pathSegment.startAngle,
+            pathSegment.endAngle,
+            Boolean(pathSegment.clockwise)
+          );
+        }
       }
     }
-    shape.closePath();
+    if (shape) {
+      shape.closePath();
+    }
   } else {
-    worldPoints.forEach((pt, index) => {
-      const relativeX = pt.x - centroid.x;
-      const relativeY = pt.y - centroid.y;
-      if (index === 0) {
-        shape.moveTo(relativeX, relativeY);
-      } else {
-        shape.lineTo(relativeX, relativeY);
-      }
-    });
-    shape.closePath();
+    if (shape) {
+      worldPoints.forEach((pt, index) => {
+        const relativeX = pt.x - centroid.x;
+        const relativeY = pt.y - centroid.y;
+        if (index === 0) {
+          shape.moveTo(relativeX, relativeY);
+        } else {
+          shape.lineTo(relativeX, relativeY);
+        }
+      });
+      shape.closePath();
+    }
   }
 
   const baseFaceDir = Number.isFinite(routingFaceDir)
@@ -1429,14 +1439,17 @@ function createPafPolygonMesh(segment, routing, context) {
   const depthWorld = Math.max(depthMm * scale, scale * 2);
   const topZMm = surfaceZMm + faceDir * tinyLift;
   const centerZMm = topZMm - faceDir * depthMm / 2;
-  const extrudeGeometry = new THREE.ExtrudeGeometry(shape, {
-    depth: depthWorld,
-    bevelEnabled: false
-  });
-  extrudeGeometry.translate(0, 0, -depthWorld / 2);
-  const volumeMesh = new THREE.Mesh(extrudeGeometry, materials.pafRouting);
-  volumeMesh.position.set(centroid.x, centroid.y, centerZMm * scale);
-  volumeMesh.renderOrder = 1;
+  let volumeMesh = null;
+  if (shape) {
+    const extrudeGeometry = new THREE.ExtrudeGeometry(shape, {
+      depth: depthWorld,
+      bevelEnabled: false
+    });
+    extrudeGeometry.translate(0, 0, -depthWorld / 2);
+    volumeMesh = new THREE.Mesh(extrudeGeometry, materials.pafRouting);
+    volumeMesh.position.set(centroid.x, centroid.y, centerZMm * scale);
+    volumeMesh.renderOrder = 1;
+  }
 
   const overlayArtifacts = [];
   if (cornerArtifacts.length > 0) {
@@ -1483,7 +1496,9 @@ function createPafPolygonMesh(segment, routing, context) {
   }
 
   const group = new THREE.Group();
-  group.add(volumeMesh);
+  if (volumeMesh) {
+    group.add(volumeMesh);
+  }
   group.add(line);
   overlayArtifacts.forEach(artifact => {
     group.add(artifact);
@@ -1510,7 +1525,9 @@ function createPafPolygonMesh(segment, routing, context) {
     depth: depthMm,
     setHoverState: state => {
       line.material = state ? highlightMaterial : baseMaterial;
-      volumeMesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+      if (volumeMesh) {
+        volumeMesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+      }
       if (expandedLine && materials.pafOvercuttingLine && highlightMaterials.pafOvercuttingLine) {
         expandedLine.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
       }
