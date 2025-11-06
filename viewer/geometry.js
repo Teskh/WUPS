@@ -1408,6 +1408,13 @@ function createPafPolygonMesh(segment, routing, context) {
 
   const line = new THREE.LineSegments(geometry, baseMaterial);
 
+  // For dashed lines, we need to compute line distances
+  if (isUndercut) {
+    line.computeLineDistances();
+  }
+
+  line.renderOrder = 2;
+
   const cornerArtifacts = buildCornerArtifacts(
     deduped,
     offsets,
@@ -1418,37 +1425,30 @@ function createPafPolygonMesh(segment, routing, context) {
     materials
   );
 
-  // For dashed lines, we need to compute line distances
-  if (isUndercut) {
-    line.computeLineDistances();
-  }
-
-  line.userData.kind = "paf";
-  line.userData.routing = routing;
-  line.userData.segment = segment;
-  line.userData.editorId = routing?.__editorId ?? null;
-  line.userData.originalMaterial = baseMaterial;
-  line.userData.controlCode = controlCode;
-  line.userData.controlInfo = controlInfo;
-  line.userData.footprintAdjustment = adjustment;
-  line.userData.assumedToolRadius = adjustment?.applied ? DEFAULT_TOOL_RADIUS : null;
-  const footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS, {
-    adjustment
+  const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
+  const depthWorld = Math.max(depthMm * scale, scale * 2);
+  const topZMm = surfaceZMm + faceDir * tinyLift;
+  const centerZMm = topZMm - faceDir * depthMm / 2;
+  const extrudeGeometry = new THREE.ExtrudeGeometry(shape, {
+    depth: depthWorld,
+    bevelEnabled: false
   });
-  if (footprint) {
-    line.userData.cutoutFootprint = footprint;
+  extrudeGeometry.translate(0, 0, -depthWorld / 2);
+  const volumeMesh = new THREE.Mesh(extrudeGeometry, materials.pafRouting);
+  volumeMesh.position.set(centroid.x, centroid.y, centerZMm * scale);
+  volumeMesh.renderOrder = 1;
+
+  const overlayArtifacts = [];
+  if (cornerArtifacts.length > 0) {
+    cornerArtifacts.forEach(artifact => {
+      if (artifact) {
+        overlayArtifacts.push(artifact);
+      }
+    });
   }
-  const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
-  line.userData.layer = resolvedLayer;
-  line.userData.setHoverState = state => {
-    line.material = state ? highlightMaterial : baseMaterial;
-  };
 
-  // Create overcutting visualization if applicable
+  let expandedLine = null;
   if (adjustment?.applied && adjustment.expansion > 0) {
-    const group = new THREE.Group();
-    group.add(line);
-
     const expansionMm = adjustment.expansion / 2; // expansion per side
     const offsetPoints = offsetPolygonPoints(deduped, expansionMm, { closed: isClosedPath });
     const cleanedOffsetPoints = Array.isArray(offsetPoints) ? dedupeSequentialPoints(offsetPoints) : null;
@@ -1475,74 +1475,61 @@ function createPafPolygonMesh(segment, routing, context) {
 
       if (expandedPoints3D.length > 0) {
         const expandedGeometry = new THREE.BufferGeometry().setFromPoints(expandedPoints3D);
-        const expandedLine = new THREE.LineSegments(expandedGeometry, materials.pafOvercuttingLine);
+        expandedLine = new THREE.LineSegments(expandedGeometry, materials.pafOvercuttingLine);
         expandedLine.userData = { overlayRole: "overcutOutline" };
-        group.add(expandedLine);
+        overlayArtifacts.push(expandedLine);
       }
     }
+  }
 
-    if (cornerArtifacts.length > 0) {
-      cornerArtifacts.forEach(artifact => {
-        if (artifact) {
-          group.add(artifact);
+  const group = new THREE.Group();
+  group.add(volumeMesh);
+  group.add(line);
+  overlayArtifacts.forEach(artifact => {
+    group.add(artifact);
+  });
+
+  const footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS, {
+    adjustment
+  });
+  const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
+
+  group.userData = {
+    kind: "paf",
+    routing,
+    segment,
+    editorId: routing?.__editorId ?? null,
+    originalMaterial: materials.pafRouting,
+    originalLineMaterial: baseMaterial,
+    controlCode,
+    controlInfo,
+    footprintAdjustment: adjustment,
+    assumedToolRadius: adjustment?.applied ? DEFAULT_TOOL_RADIUS : null,
+    cutoutFootprint: footprint ?? null,
+    layer: resolvedLayer,
+    depth: depthMm,
+    setHoverState: state => {
+      line.material = state ? highlightMaterial : baseMaterial;
+      volumeMesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
+      if (expandedLine && materials.pafOvercuttingLine && highlightMaterials.pafOvercuttingLine) {
+        expandedLine.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
+      }
+      for (const artifact of overlayArtifacts) {
+        if (!artifact?.userData) {
+          continue;
         }
-      });
+        if (artifact.userData.cornerArtifact === "radius") {
+          if (materials.pafCornerRadiusLine && highlightMaterials.pafCornerRadiusLine) {
+            artifact.material = state ? highlightMaterials.pafCornerRadiusLine : materials.pafCornerRadiusLine;
+          }
+        } else if (artifact.userData.cornerArtifact === "relief") {
+          if (materials.pafCornerReliefLine && highlightMaterials.pafCornerReliefLine) {
+            artifact.material = state ? highlightMaterials.pafCornerReliefLine : materials.pafCornerReliefLine;
+          }
+        }
+      }
     }
+  };
 
-    group.position.set(0, 0, 0);
-
-    // Transfer userData to group
-    group.userData = { ...line.userData };
-    group.userData.setHoverState = state => {
-      line.material = state ? highlightMaterial : baseMaterial;
-      for (const child of group.children) {
-        if (child.userData?.overlayRole === "overcutOutline") {
-          if (materials.pafOvercuttingLine && highlightMaterials.pafOvercuttingLine) {
-            child.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
-          }
-        } else if (child.userData?.cornerArtifact === "radius") {
-          if (materials.pafCornerRadiusLine && highlightMaterials.pafCornerRadiusLine) {
-            child.material = state ? highlightMaterials.pafCornerRadiusLine : materials.pafCornerRadiusLine;
-          }
-        } else if (child.userData?.cornerArtifact === "relief") {
-          if (materials.pafCornerReliefLine && highlightMaterials.pafCornerReliefLine) {
-            child.material = state ? highlightMaterials.pafCornerReliefLine : materials.pafCornerReliefLine;
-          }
-        }
-      }
-    };
-
-    return group;
-  }
-
-  if (cornerArtifacts.length > 0) {
-    const group = new THREE.Group();
-    group.add(line);
-    cornerArtifacts.forEach(artifact => {
-      if (artifact) {
-        group.add(artifact);
-      }
-    });
-    group.position.set(0, 0, 0);
-
-    group.userData = { ...line.userData };
-    group.userData.setHoverState = state => {
-      line.material = state ? highlightMaterial : baseMaterial;
-      for (const child of group.children) {
-        if (child.userData?.cornerArtifact === "radius") {
-          if (materials.pafCornerRadiusLine && highlightMaterials.pafCornerRadiusLine) {
-            child.material = state ? highlightMaterials.pafCornerRadiusLine : materials.pafCornerRadiusLine;
-          }
-        } else if (child.userData?.cornerArtifact === "relief") {
-          if (materials.pafCornerReliefLine && highlightMaterials.pafCornerReliefLine) {
-            child.material = state ? highlightMaterials.pafCornerReliefLine : materials.pafCornerReliefLine;
-          }
-        }
-      }
-    };
-
-    return group;
-  }
-
-  return line;
+  return group;
 }
