@@ -54,6 +54,8 @@ export function parseWup(wupText) {
   let currentRouting = null;
   let currentPolygon = null;
   let activePanelLayer = null;
+  let activePanelLayerIndex = null;
+  let activePanelCommand = null;
   let lastBoyContext = null;
 
   function setBoyContext(kind, role, element) {
@@ -62,6 +64,53 @@ export function parseWup(wupText) {
       return;
     }
     lastBoyContext = { kind, role: role ?? null, element: element ?? null };
+  }
+
+  function handlePanelCommand(command, body, numbers) {
+    const layerIndex = parsePanelLayerIndex(command);
+    const params = extractPanelParameters(body);
+    const panelNumbers = params.numbers.length >= 6 ? params.numbers : numbers;
+    if (panelNumbers.length < 6) {
+      currentPanel = null;
+      activePanelLayer = null;
+      activePanelLayerIndex = null;
+      activePanelCommand = null;
+      return false;
+    }
+
+    const materialToken = params.materialToken ?? extractFirstStringToken(body);
+    const materialIndex = panelNumbers[5];
+    const zPosition = panelNumbers.length >= 7 ? panelNumbers[6] : null;
+    const rotationValue = panelNumbers.length >= 8 ? panelNumbers[7] : null;
+    const isExterior = command.startsWith("PLA");
+    const faceDirection = isExterior ? -1 : 1;
+    const layer = faceDirection >= 0 ? "pli" : "pla";
+
+    const panel = {
+      width: panelNumbers[0],
+      height: panelNumbers[1],
+      thickness: panelNumbers[2],
+      x: panelNumbers[3],
+      y: panelNumbers[4],
+      offset: Number.isFinite(zPosition) ? zPosition : null,
+      rotation: Number.isFinite(rotationValue) ? rotationValue : 0,
+      materialIndex: Number.isFinite(materialIndex) ? materialIndex : null,
+      material: materialToken ?? null,
+      faceDirection,
+      layer,
+      layerIndex: Number.isFinite(layerIndex) ? layerIndex : null,
+      layerCommand: command,
+      points: [],
+      source: [...panelNumbers]
+    };
+
+    model.sheathing.push(panel);
+    currentPanel = panel;
+    activePanelLayer = layer;
+    activePanelLayerIndex = Number.isFinite(layerIndex) ? layerIndex : null;
+    activePanelCommand = command;
+
+    return true;
   }
 
   function finalizePolygonSegment() {
@@ -151,6 +200,14 @@ export function parseWup(wupText) {
       currentPanel = null;
     }
 
+    if (isPanelCommand(command)) {
+      const handled = handlePanelCommand(command, body, numbers);
+      if (!handled) {
+        model.unhandled.push({ command, numbers, body });
+      }
+      continue;
+    }
+
     switch (command) {
       case "ELM": {
         if (numbers.length >= 2) {
@@ -232,6 +289,8 @@ export function parseWup(wupText) {
           passes: numbers[2] ?? null,
           segments: [],
           layer: activePanelLayer ?? null,
+          layerIndex: activePanelLayerIndex ?? null,
+          layerCommand: activePanelCommand ?? null,
           source: numbers,
           body,
           __statementIndex: statementIndex,
@@ -278,38 +337,6 @@ export function parseWup(wupText) {
           extendBoundsPoint(model.bounds, position.x + radius, position.y + radius);
         } else {
           model.unhandled.push({ command, numbers, body });
-        }
-        break;
-      }
-      case "PLI1":
-      case "PLA1": {
-        const panelParams = extractPanelParameters(body);
-        const panelNumbers = panelParams.numbers.length >= 6 ? panelParams.numbers : numbers;
-        if (panelNumbers.length >= 6) {
-          const materialToken = panelParams.materialToken ?? extractFirstStringToken(body);
-          const materialIndex = panelNumbers[5];
-          const zPosition = panelNumbers.length >= 7 ? panelNumbers[6] : null;
-          const rotationValue = panelNumbers.length >= 8 ? panelNumbers[7] : null;
-          const faceDirection = command.startsWith("PLA") ? -1 : 1;
-          const layer = faceDirection >= 0 ? "pli" : "pla";
-          const panel = {
-            width: panelNumbers[0],
-            height: panelNumbers[1],
-            thickness: panelNumbers[2],
-            x: panelNumbers[3],
-            y: panelNumbers[4],
-            offset: Number.isFinite(zPosition) ? zPosition : null,
-            rotation: Number.isFinite(rotationValue) ? rotationValue : 0,
-            materialIndex: Number.isFinite(materialIndex) ? materialIndex : null,
-            material: materialToken ?? null,
-            faceDirection,
-            layer,
-            points: [],
-            source: [...panelNumbers]
-          };
-          model.sheathing.push(panel);
-          currentPanel = panel;
-          activePanelLayer = layer;
         }
         break;
       }
@@ -485,6 +512,8 @@ export function parseWup(wupText) {
             spacing: numbers[4] ?? null,
             gauge: numbers[5] ?? null,
             layer,
+            layerIndex: activePanelLayerIndex ?? null,
+            layerCommand: activePanelCommand ?? null,
             source: numbers,
             __statementIndex: statementIndex,
             __command: command,
@@ -619,6 +648,29 @@ export function buildRectFromElement(numbers, moduleContext, options = {}) {
     role: typeof options.role === "string" ? options.role : null,
     source: numbers
   };
+}
+
+function isPanelCommand(command) {
+  if (typeof command !== "string") {
+    return false;
+  }
+  if (!command.startsWith("PLI") && !command.startsWith("PLA")) {
+    return false;
+  }
+  const suffix = command.slice(3);
+  return suffix.length > 0 && /^\d+$/.test(suffix);
+}
+
+function parsePanelLayerIndex(command) {
+  if (typeof command !== "string") {
+    return null;
+  }
+  const suffix = command.slice(3);
+  if (!/^\d+$/.test(suffix)) {
+    return null;
+  }
+  const parsed = Number.parseInt(suffix, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function splitCommand(statement) {
