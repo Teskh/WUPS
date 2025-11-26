@@ -64,6 +64,6 @@ document.addEventListener("diagnostics:zoomToNailRow", event => {
 });
 
 document.addEventListener("diagnostics:zoomToPosition", event => {
-  const { x, y } = event.detail;
-  viewer.zoomToPosition(x, y);
+  const { x, y, layer } = event.detail;
+  viewer.zoomToPosition(x, y, layer);
 });

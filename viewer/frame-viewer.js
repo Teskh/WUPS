@@ -985,11 +985,14 @@ export class FrameViewer {
     }
   }
 
-  zoomToPosition(x, y) {
+  zoomToPosition(x, y, layer) {
     // Find a mesh near the specified x, y position
     // This is used for outlets and other PAF operations
     let targetMesh = null;
     const tolerance = 50; // mm tolerance for position matching (larger since we're looking for area)
+
+    // Pre-compute world target point from model coordinates
+    const worldTarget = this.modelPointToWorld({ x, y });
 
     const searchGroups = [
       this.groups?.plaPafRoutings,
@@ -1041,15 +1044,54 @@ export class FrameViewer {
 
     if (!targetMesh) {
       console.warn(`No mesh found near position x=${x}, y=${y}`);
-      // Fallback: just zoom to the specified position
-      const worldPos = new THREE.Vector3(x, y, 0);
-      this.zoomToWorldPosition(worldPos);
+      // Fallback: zoom to the computed world target (scaled to scene)
+      // Calculate proper Z based on layer
+      const resolvedLayer = typeof layer === "string" && layer ? layer : "pli";
+      const faceDir = resolveLayerFaceDirectionForViewer(resolvedLayer, this.wallSide ?? 1);
+      const wallThickness = Number.isFinite(this.wallThickness) ? this.wallThickness : 90;
+      const scale = this.cachedDimensions?.scale || 1;
+      const surfaceZ = computeNailRowZForViewer(wallThickness, faceDir, this.sheathingSurfaces) * scale;
+
+      if (worldTarget) {
+        worldTarget.z = surfaceZ;
+        this.zoomToWorldPosition(worldTarget);
+      } else {
+        const worldPos = new THREE.Vector3(x * scale, y * scale, surfaceZ);
+        this.zoomToWorldPosition(worldPos);
+      }
       return;
     }
 
     // Get the world position of the mesh
-    const worldPos = new THREE.Vector3();
-    targetMesh.getWorldPosition(worldPos);
+    // For polygon groups, getWorldPosition returns (0,0,0) since the group itself isn't positioned
+    // So we calculate the center from segment points instead
+    let worldPos = new THREE.Vector3();
+    const segment = targetMesh.userData?.segment;
+    if (segment?.kind === "polygon" && Array.isArray(segment.points) && segment.points.length > 0) {
+      // Calculate center from polygon points
+      const points = segment.points;
+      let sumX = 0, sumY = 0;
+      for (const pt of points) {
+        sumX += pt.x;
+        sumY += pt.y;
+      }
+      const centerX = sumX / points.length;
+      const centerY = sumY / points.length;
+      const worldCenter = this.modelPointToWorld({ x: centerX, y: centerY });
+      if (worldCenter) {
+        // Calculate Z based on layer
+        const meshLayer = targetMesh.userData?.layer ?? "pli";
+        const faceDir = resolveLayerFaceDirectionForViewer(meshLayer, this.wallSide ?? 1);
+        const wallThickness = Number.isFinite(this.wallThickness) ? this.wallThickness : 90;
+        const scale = this.cachedDimensions?.scale || 1;
+        worldCenter.z = computeNailRowZForViewer(wallThickness, faceDir, this.sheathingSurfaces) * scale;
+        worldPos = worldCenter;
+      } else {
+        targetMesh.getWorldPosition(worldPos);
+      }
+    } else {
+      targetMesh.getWorldPosition(worldPos);
+    }
 
     this.zoomToWorldPosition(worldPos);
     this.highlightMesh(targetMesh);

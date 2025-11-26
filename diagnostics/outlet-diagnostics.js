@@ -7,6 +7,10 @@
  * - The MP circles are positioned such that their Y coordinate minus radius
  *   matches one of the corners of the box cut (for horizontal alignment)
  *   OR X coordinate minus radius matches (for vertical alignment)
+ *
+ * Structural clearance check:
+ * - Legacy outlet edges must be at least 5mm away from structural elements (studs, blocking, plates)
+ * - Anything closer than 5mm raises an alarm
  */
 
 export function runOutletDiagnostics(model) {
@@ -19,20 +23,36 @@ export function runOutletDiagnostics(model) {
   }
 
   const pafRoutings = model.pafRoutings;
+  const structuralMembers = [
+    ...(Array.isArray(model.studs) ? model.studs : []),
+    ...(Array.isArray(model.blocking) ? model.blocking : []),
+    ...(Array.isArray(model.plates) ? model.plates : [])
+  ];
 
   const results = {
     summary: {
       total: 0,
-      legacyOutlets: 0
+      legacyOutlets: 0,
+      passed: 0,
+      failed: 0,
+      clearanceAlerts: 0,
+      clearancePass: 0
     },
     checks: [
       {
         name: "Legacy Outlet Detection",
         description: "Detects legacy electrical outlet cuts with box and circular cuts",
         results: []
+      },
+      {
+        name: "Outlet Structural Clearance",
+        description: "Outlet edges must be at least 5mm from structural members (studs, blocking, plates)",
+        results: []
       }
     ]
   };
+
+  const detectedOutlets = [];
 
   // Collect all circles and polygons from all routings
   const circles = [];
@@ -83,19 +103,38 @@ export function runOutletDiagnostics(model) {
 
       const replacement = buildReplacementData(polygon, legacyOutlet);
 
-      results.checks[0].results.push({
+      const detectionResult = {
         id: `PAF Routings ${routingIds}`,
         routing: polygon.routing,
         passed: false,
         message: legacyOutlet.message,
         details: legacyOutlet.details,
         position: legacyOutlet.position,
-        replacement
-      });
+        replacement,
+        bounds: legacyOutlet.bounds
+      };
+
+      results.checks[0].results.push(detectionResult);
+      detectedOutlets.push({ detectionResult, legacyOutlet });
     }
   });
 
-  results.summary.total = results.checks[0].results.length;
+  results.summary.total = detectedOutlets.length;
+  results.summary.legacyOutlets = detectedOutlets.length;
+  results.summary.failed = detectedOutlets.length;
+  results.summary.passed = 0;
+
+  // Structural clearance checks for each legacy outlet
+  detectedOutlets.forEach(entry => {
+    const { detectionResult, legacyOutlet } = entry;
+    const clearanceResult = checkOutletClearance(detectionResult, legacyOutlet, structuralMembers);
+    results.checks[1].results.push(clearanceResult);
+    if (clearanceResult.passed) {
+      results.summary.clearancePass += 1;
+    } else {
+      results.summary.clearanceAlerts += 1;
+    }
+  });
 
   return results;
 }
@@ -269,6 +308,11 @@ function detectLegacyOutletPattern(polygon, allCircles) {
   const centerX = (boxMinX + boxMaxX) / 2;
   const centerY = (boxMinY + boxMaxY) / 2;
 
+  const bounds = computeOutletBounds(
+    { minX: boxMinX, maxX: boxMaxX, minY: boxMinY, maxY: boxMaxY },
+    matchedCircles
+  );
+
   return {
     isLegacy: true,
     matchedCircles,
@@ -286,6 +330,7 @@ function detectLegacyOutletPattern(polygon, allCircles) {
       x: centerX,
       y: centerY
     },
+    bounds,
     orientationType,
     metadata: {
       center: { x: centerX, y: centerY },
@@ -333,6 +378,223 @@ function buildReplacementData(polygon, legacyOutlet) {
   };
 }
 
+function computeOutletBounds(boxBounds, circles) {
+  if (!boxBounds) {
+    return null;
+  }
+
+  let minX = boxBounds.minX;
+  let maxX = boxBounds.maxX;
+  let minY = boxBounds.minY;
+  let maxY = boxBounds.maxY;
+
+  (circles || []).forEach(circle => {
+    if (!circle?.position || !Number.isFinite(circle.radius)) {
+      return;
+    }
+    const { x, y } = circle.position;
+    minX = Math.min(minX, x - circle.radius);
+    maxX = Math.max(maxX, x + circle.radius);
+    minY = Math.min(minY, y - circle.radius);
+    maxY = Math.max(maxY, y + circle.radius);
+  });
+
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+    center: {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2
+    }
+  };
+}
+
+function checkOutletClearance(detectionResult, legacyOutlet, structuralMembers) {
+  const MIN_CLEARANCE = 5; // mm
+  const bounds = detectionResult?.bounds ?? legacyOutlet?.bounds ?? null;
+  const id = detectionResult?.id || "Outlet";
+
+  if (!bounds) {
+    return {
+      id,
+      passed: false,
+      alert: true,
+      message: "Unable to determine outlet bounds for clearance check",
+      details: {},
+      position: detectionResult?.position ?? legacyOutlet?.position ?? null,
+      outlet: detectionResult?.routing ?? null
+    };
+  }
+
+  const validMembers = (structuralMembers || []).filter(member =>
+    Number.isFinite(member?.x) &&
+    Number.isFinite(member?.y) &&
+    Number.isFinite(member?.width) &&
+    Number.isFinite(member?.height)
+  );
+
+  if (validMembers.length === 0) {
+    return {
+      id,
+      passed: true,
+      alert: false,
+      message: "No structural members available for clearance check",
+      details: {
+        outletBounds: formatBounds(bounds)
+      },
+      position: detectionResult?.position ?? legacyOutlet?.position ?? null,
+      outlet: detectionResult?.routing ?? null
+    };
+  }
+
+  let closest = null;
+  for (const member of validMembers) {
+    const clearanceInfo = calculateRectClearance(bounds, member);
+    if (!closest || clearanceInfo.effectiveClearance < closest.effectiveClearance) {
+      closest = {
+        ...clearanceInfo,
+        member,
+        memberType: describeMember(member)
+      };
+    }
+  }
+
+  const clearance = closest ? closest.effectiveClearance : Number.POSITIVE_INFINITY;
+  const passed = clearance >= MIN_CLEARANCE;
+  const isOverlap = closest?.overlapping ?? false;
+  const memberLabel = closest?.memberType || "structural member";
+  const clearanceText = Number.isFinite(clearance) ? clearance.toFixed(1) : "unknown";
+
+  let message;
+  if (!Number.isFinite(clearance)) {
+    message = `Unable to compute clearance to nearest ${memberLabel}`;
+  } else if (isOverlap) {
+    message = `Outlet overlaps ${memberLabel} (penetration ${Math.abs(clearance).toFixed(1)}mm, minimum ${MIN_CLEARANCE}mm clear)`;
+  } else if (passed) {
+    message = `Clearance OK: ${clearanceText}mm from nearest ${memberLabel}`;
+  } else {
+    message = `Outlet too close to ${memberLabel} (${clearanceText}mm, minimum ${MIN_CLEARANCE}mm required)`;
+  }
+
+  return {
+    id,
+    passed,
+    alert: !passed,
+    message,
+    details: buildClearanceDetails(bounds, closest, MIN_CLEARANCE),
+    position: detectionResult?.position ?? legacyOutlet?.position ?? null,
+    outlet: detectionResult?.routing ?? null,
+    replacement: detectionResult?.replacement ?? null
+  };
+}
+
+function calculateRectClearance(outletBounds, member) {
+  const memberMinX = member.x;
+  const memberMaxX = member.x + member.width;
+  const memberMinY = member.y;
+  const memberMaxY = member.y + member.height;
+
+  const horizontalGap =
+    memberMinX > outletBounds.maxX
+      ? memberMinX - outletBounds.maxX
+      : outletBounds.minX > memberMaxX
+        ? outletBounds.minX - memberMaxX
+        : 0;
+
+  const verticalGap =
+    memberMinY > outletBounds.maxY
+      ? memberMinY - outletBounds.maxY
+      : outletBounds.minY > memberMaxY
+        ? outletBounds.minY - memberMaxY
+        : 0;
+
+  const overlapsX = horizontalGap === 0;
+  const overlapsY = verticalGap === 0;
+  const overlapX = overlapsX ? Math.min(outletBounds.maxX, memberMaxX) - Math.max(outletBounds.minX, memberMinX) : 0;
+  const overlapY = overlapsY ? Math.min(outletBounds.maxY, memberMaxY) - Math.max(outletBounds.minY, memberMinY) : 0;
+  const overlapping = overlapsX && overlapsY && overlapX > 0 && overlapY > 0;
+
+  const diagonalGap = Math.hypot(horizontalGap, verticalGap);
+  const effectiveClearance = overlapping
+    ? -Math.min(overlapX, overlapY)
+    : (horizontalGap === 0 || verticalGap === 0
+        ? Math.max(horizontalGap, verticalGap)
+        : diagonalGap);
+
+  const nearestEdge = determineNearestEdge(outletBounds, { memberMinX, memberMaxX, memberMinY, memberMaxY }, horizontalGap, verticalGap);
+
+  return {
+    horizontalGap,
+    verticalGap,
+    diagonalGap,
+    overlapping,
+    overlapDepth: overlapping ? Math.min(overlapX, overlapY) : 0,
+    effectiveClearance,
+    nearestEdge
+  };
+}
+
+function determineNearestEdge(outletBounds, memberBounds, horizontalGap, verticalGap) {
+  const outletCenterX = (outletBounds.minX + outletBounds.maxX) / 2;
+  const outletCenterY = (outletBounds.minY + outletBounds.maxY) / 2;
+  const memberCenterX = (memberBounds.memberMinX + memberBounds.memberMaxX) / 2;
+  const memberCenterY = (memberBounds.memberMinY + memberBounds.memberMaxY) / 2;
+
+  if (horizontalGap > verticalGap) {
+    return outletCenterX < memberCenterX ? "right" : "left";
+  }
+  if (verticalGap > horizontalGap) {
+    return outletCenterY < memberCenterY ? "top" : "bottom";
+  }
+  return "corner";
+}
+
+function describeMember(member) {
+  if (member?.role === "top") return "top plate";
+  if (member?.role === "bottom") return "bottom plate";
+  if (member?.orientation === "vertical") return "stud";
+  if (member?.orientation === "horizontal") return "blocking";
+  return "structural member";
+}
+
+function formatBounds(bounds) {
+  return `(${bounds.minX.toFixed(1)}, ${bounds.minY.toFixed(1)}) to (${bounds.maxX.toFixed(1)}, ${bounds.maxY.toFixed(1)})`;
+}
+
+function buildClearanceDetails(bounds, closest, minRequired) {
+  if (!closest) {
+    return {
+      outletBounds: bounds ? formatBounds(bounds) : "unknown",
+      requiredClearance: `${minRequired}mm`
+    };
+  }
+
+  const member = closest.member;
+  const memberPosition = member
+    ? `(${member.x.toFixed(1)}, ${member.y.toFixed(1)})`
+    : "unknown";
+  const memberSize = member
+    ? `${member.width.toFixed(1)}mm x ${member.height.toFixed(1)}mm`
+    : "unknown";
+
+  return {
+    outletBounds: bounds ? formatBounds(bounds) : "unknown",
+    nearestMember: closest.memberType || "structural member",
+    memberPosition,
+    memberSize,
+    nearestEdge: closest.nearestEdge,
+    clearance: Number.isFinite(closest.effectiveClearance) ? `${closest.effectiveClearance.toFixed(1)}mm` : "unknown",
+    horizontalGap: `${closest.horizontalGap.toFixed(1)}mm`,
+    verticalGap: `${closest.verticalGap.toFixed(1)}mm`,
+    overlapDepth: closest.overlapDepth > 0 ? `${closest.overlapDepth.toFixed(1)}mm` : "0.0mm",
+    requiredClearance: `${minRequired}mm`
+  };
+}
+
 /**
  * Format diagnostic results as text report
  */
@@ -343,7 +605,10 @@ export function formatOutletReport(results) {
 
   let report = `Outlet Diagnostics Report\n`;
   report += `${'='.repeat(50)}\n\n`;
-  report += `Total Legacy Outlets Found: ${results.summary.legacyOutlets}\n\n`;
+  report += `Total Legacy Outlets Found: ${results.summary.legacyOutlets}\n`;
+  report += `Legacy Outlets Pending Modernization: ${results.summary.failed}\n`;
+  report += `Clearance OK: ${results.summary.clearancePass}\n`;
+  report += `Clearance Alerts (<5mm): ${results.summary.clearanceAlerts}\n\n`;
 
   if (results.summary.legacyOutlets === 0) {
     report += `No legacy outlets detected. All outlets use the modern format.\n\n`;

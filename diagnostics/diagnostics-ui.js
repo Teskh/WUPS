@@ -353,21 +353,15 @@ function createCheckSection(check) {
       zoomButton = `<button class="zoom-to-nr" data-nr-id="${editorId}" data-layer="${layer}" data-start-x="${startX}" data-start-y="${startY}" data-end-x="${endX}" data-end-y="${endY}" title="Zoom to this NR">🔍</button>`;
     } else if (result.position) {
       // For outlets or other items with position data
-      zoomButton = `<button class="zoom-to-outlet" data-x="${result.position.x}" data-y="${result.position.y}" title="Zoom to this location">🔍</button>`;
+      const bx = Number.isFinite(result.position.x) ? result.position.x : (result.bounds?.center?.x ?? "");
+      const by = Number.isFinite(result.position.y) ? result.position.y : (result.bounds?.center?.y ?? "");
+      const cx = Number.isFinite(result.bounds?.center?.x) ? result.bounds.center.x : "";
+      const cy = Number.isFinite(result.bounds?.center?.y) ? result.bounds.center.y : "";
+      const outletLayer = result.routing?.layer ?? result.outlet?.layer ?? "";
+      zoomButton = `<button class="zoom-to-outlet" data-x="${bx}" data-y="${by}" data-cx="${cx}" data-cy="${cy}" data-layer="${outletLayer}" title="Zoom to this location">🔍</button>`;
     }
 
-    let replaceButton = '';
-    if (!result.passed && result.replacement) {
-      const orientation = result.replacement.orientation;
-      const supportedOrientation = orientation === "horizontal" || orientation === "vertical";
-      const disabledAttr = supportedOrientation ? "" : " disabled";
-      const title = supportedOrientation
-        ? "Replace legacy outlet with modern routing"
-        : "Replacement not yet supported for this orientation";
-      replaceButton = `<button class="replace-legacy-outlet"${disabledAttr} type="button" title="${title}">Replace</button>`;
-    }
-
-    const actionButtons = `${zoomButton}${replaceButton}`;
+    const actionButtons = `${zoomButton}`;
 
     item.innerHTML = `
       <div class="result-summary">
@@ -442,21 +436,19 @@ function createCheckSection(check) {
     if (zoomOutletBtn) {
       zoomOutletBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        const x = parseFloat(zoomOutletBtn.dataset.x);
-        const y = parseFloat(zoomOutletBtn.dataset.y);
-        zoomToPosition(x, y);
-        hideDiagnostics();
-      });
-    }
-
-    const replaceOutletBtn = item.querySelector(".replace-legacy-outlet");
-    if (replaceOutletBtn) {
-      replaceOutletBtn.addEventListener("click", (e) => {
-        if (replaceOutletBtn.disabled) {
+        const xPrimary = parseFloat(zoomOutletBtn.dataset.x);
+        const yPrimary = parseFloat(zoomOutletBtn.dataset.y);
+        const xCenter = parseFloat(zoomOutletBtn.dataset.cx);
+        const yCenter = parseFloat(zoomOutletBtn.dataset.cy);
+        const x = Number.isFinite(xPrimary) ? xPrimary : xCenter;
+        const y = Number.isFinite(yPrimary) ? yPrimary : yCenter;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          alert("Unable to determine outlet location to zoom.");
           return;
         }
-        e.stopPropagation();
-        handleReplaceOutlet(result);
+        const layer = zoomOutletBtn.dataset.layer || null;
+        zoomToPosition(x, y, layer);
+        hideDiagnostics();
       });
     }
 
@@ -513,12 +505,12 @@ function zoomToNailRow(nrData) {
 /**
  * Zoom the 3D viewer to a specific position (e.g., outlet)
  */
-function zoomToPosition(x, y) {
+function zoomToPosition(x, y, layer) {
   // Dispatch event for the 3D viewer to handle
   if (typeof document !== "undefined") {
     document.dispatchEvent(
       new CustomEvent("diagnostics:zoomToPosition", {
-        detail: { x, y }
+        detail: { x, y, layer: layer ?? null }
       })
     );
   }

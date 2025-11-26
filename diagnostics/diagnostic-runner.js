@@ -8,6 +8,7 @@
 import { runBoyDiagnostics, formatDiagnosticReport as formatBoyReport } from "./boy-diagnostics.js";
 import { runOutletDiagnostics, formatOutletReport } from "./outlet-diagnostics.js";
 import { runNrDiagnostics, formatNrReport } from "./nr-diagnostics.js";
+import { runPlateMislabelDiagnostics, formatPlateMislabelReport } from "./plate-mislabel-diagnostics.js";
 
 /**
  * Registry of available diagnostics
@@ -30,6 +31,12 @@ const DIAGNOSTICS = {
     description: "Validates NR (Nail Row) operations: control code, structural member positioning, and edge distances",
     runner: runNrDiagnostics,
     formatter: formatNrReport
+  },
+  plates: {
+    name: "Plate Integrity",
+    description: "Detects mislabelled OG/UG components: multiple plates, short spans, and overlapping plates",
+    runner: runPlateMislabelDiagnostics,
+    formatter: formatPlateMislabelReport
   }
   // Future diagnostics can be added here:
   // paf: { ... },

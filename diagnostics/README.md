@@ -19,6 +19,7 @@ Detects legacy electrical outlet cuts that need to be updated to the modern form
 1. **Box Cut**: A closed polygon with exactly 4 corners (5 PP points with first and last matching)
 2. **Circular Cuts**: Two MP (Milling Point) circular cuts
 3. **Alignment**: The circular cuts are positioned such that their edge (center ± radius) aligns with one of the box corners
+4. **Structural Clearance**: Outlet edges keep at least 5mm away from studs, blocking, and plates (alerts when closer)
 
 **Detection Logic:**
 - For horizontal outlets: The Y coordinate of the MP minus its radius matches one of the box's Y corners
@@ -27,6 +28,7 @@ Detects legacy electrical outlet cuts that need to be updated to the modern form
 **Features:**
 - Automatically detects all legacy outlets in the model
 - Provides dimensional information (box size, circle radius)
+- Checks structural proximity (alerts below 5mm to framing edges)
 - Includes a zoom button to focus on each detected outlet in the 3D view
 - Reports orientation (horizontal/vertical) for each outlet
 
@@ -43,6 +45,19 @@ Validates NR (Nail Row) operations with three quality checks:
 - Identifies the type of structural member (stud, plate, blocking) each NR is associated with
 - Reports specific edge distances and identifies which edge is closest
 - Provides detailed failure information for non-compliant nail rows
+
+### Plate Mislabel Diagnostics (`plate-mislabel-diagnostics.js`)
+
+Detects misuse of OG/UG components based on the specification:
+
+1. **Single Plate Per Role**: Flags when more than one OG (top plate) or UG (bottom plate) is present in the element
+2. **Span Coverage**: Warns when a plate is shorter than 80% of the element length (short plate typically indicates a mislabelled stud/blocking)
+3. **Overlapping Plates**: Flags overlapping plates of the same role (multiple plates occupying the same y-plane)
+
+**Features:**
+- Works on any parsed model (no UI dependencies)
+- Reports per-check pass/fail counts and detailed failure messages
+- Compatible with `diagnostic-runner.js` for aggregated execution
 
 ### Batch Outlet Modernizer (`batch-outlet-modernizer.html`)
 
