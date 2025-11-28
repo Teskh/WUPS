@@ -4,7 +4,7 @@
  * Validates NR operations against quality standards:
  * 1. Control Code Check: NR control code (gauge) must be 10
  * 2. Structural Member Check: NR must be positioned over a structural member (bounding box containment)
- * 3. Edge Distance Check: NR must be at least 10mm from the nearest edge of the structural member
+ * 3. Edge Distance Check: NR must be at least 12mm from horizontal edges and 10mm from vertical edges of the structural member
  */
 
 export function runNrDiagnostics(model) {
@@ -43,7 +43,7 @@ export function runNrDiagnostics(model) {
       },
       {
         name: "Edge Distance Check",
-        description: "NR must be at least 10mm from the nearest edge of the structural member",
+        description: "NR must be at least 12mm from horizontal edges and 10mm from vertical edges of the structural member",
         results: []
       }
     ]
@@ -210,10 +210,12 @@ function checkStructuralMember(nr, structuralMembers) {
 }
 
 /**
- * Check 3: Distance to nearest edge of structural member must be at least 10mm
+ * Check 3: Distance to nearest edge of structural member must be at least
+ *          12mm for horizontal edges and 10mm for vertical edges
  */
 function checkEdgeDistance(nr, member) {
-  const MIN_EDGE_DISTANCE = 10; // mm
+  const MIN_EDGE_DISTANCE_HORIZONTAL = 12; // mm (top/bottom)
+  const MIN_EDGE_DISTANCE_VERTICAL = 10; // mm (left/right)
 
   if (!member) {
     return {
@@ -288,8 +290,24 @@ function checkEdgeDistance(nr, member) {
     distanceToTop = Math.min(startDistances[3], endDistances[3]);
   }
 
-  const minDistance = Math.min(distanceToLeft, distanceToRight, distanceToBottom, distanceToTop);
-  const passed = minDistance >= MIN_EDGE_DISTANCE;
+  const distances = {
+    left: distanceToLeft,
+    right: distanceToRight,
+    bottom: distanceToBottom,
+    top: distanceToTop
+  };
+
+  const requirements = {
+    left: MIN_EDGE_DISTANCE_VERTICAL,
+    right: MIN_EDGE_DISTANCE_VERTICAL,
+    top: MIN_EDGE_DISTANCE_HORIZONTAL,
+    bottom: MIN_EDGE_DISTANCE_HORIZONTAL
+  };
+
+  const failingEdges = Object.entries(distances)
+    .filter(([edge, distance]) => distance < requirements[edge]);
+
+  const minDistance = Math.min(...Object.values(distances));
 
   // Determine which edge is closest
   let closestEdge = "left";
@@ -307,11 +325,13 @@ function checkEdgeDistance(nr, member) {
     closestDist = distanceToTop;
   }
 
+  const passed = failingEdges.length === 0;
+
   return {
     passed,
     message: passed
-      ? `Edge distance OK (${minDistance.toFixed(1)}mm from nearest edge)`
-      : `Too close to edge (${minDistance.toFixed(1)}mm from ${closestEdge} edge, minimum ${MIN_EDGE_DISTANCE}mm required)`,
+      ? `Edge distance OK (${closestDist.toFixed(1)}mm from ${closestEdge} edge, minimum ${requirements[closestEdge]}mm required for that edge)`
+      : `Too close to edge (${failingEdges[0][1].toFixed(1)}mm from ${failingEdges[0][0]} edge, minimum ${requirements[failingEdges[0][0]]}mm required)`,
     details: {
       minDistance: minDistance.toFixed(1),
       closestEdge,
@@ -319,7 +339,8 @@ function checkEdgeDistance(nr, member) {
       distanceToRight: distanceToRight.toFixed(1),
       distanceToBottom: distanceToBottom.toFixed(1),
       distanceToTop: distanceToTop.toFixed(1),
-      required: MIN_EDGE_DISTANCE
+      requiredHorizontal: MIN_EDGE_DISTANCE_HORIZONTAL,
+      requiredVertical: MIN_EDGE_DISTANCE_VERTICAL
     }
   };
 }
