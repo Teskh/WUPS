@@ -1,13 +1,15 @@
 /**
  * Plate Mislabel Diagnostics
  *
- * Detects misuse of OG/UG components as described in the WUP spec:
- * 1) At most one OG (top plate) and one UG (bottom plate) per element.
- * 2) Plates should span the element length (<=20% shortfall is flagged).
- * 3) Multiple plates of the same role must not overlap (likely mislabelled studs/blocking).
+ * Detects misuse of OG/UG components while allowing legitimate splicing:
+ * 1) Coverage & splices: Union of plates per role should cover the element (default >=80%) with a reasonable splice count.
+ * 2) Short segments: Flags plate segments that are unusually short relative to element length (default <20%).
+ * 3) Overlaps: Plates of the same role must not overlap; overlaps suggest mislabelled studs/blocking.
  */
 
-const MIN_LENGTH_RATIO = 0.8; // Plate should span at least 80% of ELM length
+const MIN_COVERAGE_RATIO = 0.8; // Unioned plate coverage should be at least 80% of ELM length
+const MAX_SPLICES = 4; // Allow up to 4 segments per role before warning/fail
+const SHORT_SEGMENT_RATIO = 0.2; // Segments shorter than 20% of ELM length are suspicious
 const OVERLAP_TOLERANCE = 0.5; // mm tolerance when checking overlaps
 
 export function runPlateMislabelDiagnostics(model) {
@@ -35,13 +37,13 @@ export function runPlateMislabelDiagnostics(model) {
     },
     checks: [
       {
-        name: "Single Plate Per Role",
-        description: "There should be only one OG (top) and one UG (bottom) plate per element.",
+        name: "Coverage & Splice Count",
+        description: `Union coverage per role should be >= ${(MIN_COVERAGE_RATIO * 100).toFixed(0)}% of element length with no excessive splicing.`,
         results: []
       },
       {
-        name: "Plate Span Coverage",
-        description: `Plates should cover the element length; anything shorter than ${(MIN_LENGTH_RATIO * 100).toFixed(0)}% is flagged.`,
+        name: "Short Segment Detection",
+        description: `Individual plate segments shorter than ${(SHORT_SEGMENT_RATIO * 100).toFixed(0)}% of element length are flagged.`,
         results: []
       },
       {
@@ -52,36 +54,13 @@ export function runPlateMislabelDiagnostics(model) {
     ]
   };
 
-  // Check 1: Single plate per role
-  addRoleCountCheck(results, "top", topPlates);
-  addRoleCountCheck(results, "bottom", bottomPlates);
+  // Check 1: Coverage & splice count (per role)
+  addCoverageAndSpliceCheck(results, "top", topPlates, wallWidth);
+  addCoverageAndSpliceCheck(results, "bottom", bottomPlates, wallWidth);
 
-  // Check 2: Span coverage per plate
-  plates.forEach((plate, index) => {
-    const length = Number.isFinite(plate.width) ? plate.width : null;
-    const ratio = wallWidth && length ? length / wallWidth : null;
-    const passed = ratio === null ? true : ratio >= MIN_LENGTH_RATIO;
-    const message =
-      ratio === null
-        ? "Element length unknown; length check skipped"
-        : passed
-          ? `Length OK (${(ratio * 100).toFixed(1)}% of element length)`
-          : `Plate is short (${(ratio * 100).toFixed(1)}% of element length, expected at least ${(MIN_LENGTH_RATIO * 100).toFixed(0)}%)`;
-
-    recordResult(results, 1, {
-      id: buildPlateId(plate, index),
-      plate,
-      passed,
-      message,
-      details: {
-        role: plate.role || "unknown",
-        length: length?.toFixed ? length.toFixed(1) : null,
-        wallWidth: wallWidth?.toFixed ? wallWidth.toFixed(1) : null,
-        ratio: ratio === null ? null : (ratio * 100).toFixed(1),
-        minimumRatioPercent: (MIN_LENGTH_RATIO * 100).toFixed(0)
-      }
-    });
-  });
+  // Check 2: Short segments
+  addShortSegmentChecks(results, "top", topPlates, wallWidth);
+  addShortSegmentChecks(results, "bottom", bottomPlates, wallWidth);
 
   // Check 3: Overlapping plates in same role
   checkOverlap(results, "top", topPlates);
@@ -90,16 +69,72 @@ export function runPlateMislabelDiagnostics(model) {
   return results;
 }
 
-function addRoleCountCheck(results, role, plates) {
+function addCoverageAndSpliceCheck(results, role, plates, wallWidth) {
+  const coverage = computeCoverage(plates);
+  const coverageRatio = wallWidth ? coverage / wallWidth : null;
   const count = plates.length;
-  const passed = count <= 1;
+
+  const passedCoverage = coverageRatio === null ? true : coverageRatio >= MIN_COVERAGE_RATIO;
+  const passedCount = count <= MAX_SPLICES;
+  const passed = passedCoverage && passedCount;
+
+  let message;
+  if (coverageRatio === null) {
+    message = passedCount ? "Element length unknown; count OK" : `Element length unknown; splice count high (${count})`;
+  } else if (!passedCoverage && !passedCount) {
+    message = `Low coverage (${(coverageRatio * 100).toFixed(1)}%) and high splice count (${count}, max ${MAX_SPLICES})`;
+  } else if (!passedCoverage) {
+    message = `Coverage too low (${(coverageRatio * 100).toFixed(1)}% of element; need ${(MIN_COVERAGE_RATIO * 100).toFixed(0)}%)`;
+  } else if (!passedCount) {
+    message = `Excessive splicing (${count} segments; max ${MAX_SPLICES})`;
+  } else {
+    message = `Coverage OK (${(coverageRatio * 100).toFixed(1)}%), splice count OK (${count})`;
+  }
+
   recordResult(results, 0, {
-    id: `${role.toUpperCase()} plates`,
+    id: `${role.toUpperCase()} coverage`,
     passed,
-    message: passed
-      ? "Count OK (1 or fewer)"
-      : `Found ${count} ${role} plates; expected a single OG/UG per element`,
-    details: { count, expectedMax: 1 }
+    message,
+    details: {
+      role,
+      coverage: coverage.toFixed(1),
+      wallWidth: wallWidth?.toFixed ? wallWidth.toFixed(1) : null,
+      coveragePercent: coverageRatio === null ? null : (coverageRatio * 100).toFixed(1),
+      minCoveragePercent: (MIN_COVERAGE_RATIO * 100).toFixed(0),
+      count,
+      maxSplices: MAX_SPLICES
+    }
+  });
+}
+
+function addShortSegmentChecks(results, role, plates, wallWidth) {
+  if (!wallWidth) {
+    return;
+  }
+  plates.forEach((plate, index) => {
+    const length = Number.isFinite(plate.width) ? plate.width : null;
+    const ratio = length ? length / wallWidth : null;
+    const passed = ratio === null ? true : ratio >= SHORT_SEGMENT_RATIO;
+    const message =
+      ratio === null
+        ? "Length unknown; skipping"
+        : passed
+          ? `Length OK (${(ratio * 100).toFixed(1)}% of element)`
+          : `Segment is short (${(ratio * 100).toFixed(1)}% of element; threshold ${(SHORT_SEGMENT_RATIO * 100).toFixed(0)}%)`;
+
+    recordResult(results, 1, {
+      id: buildPlateId(plate, index, role),
+      plate,
+      passed,
+      message,
+      details: {
+        role: plate.role || role,
+        length: length?.toFixed ? length.toFixed(1) : null,
+        wallWidth: wallWidth?.toFixed ? wallWidth.toFixed(1) : null,
+        ratio: ratio === null ? null : (ratio * 100).toFixed(1),
+        minimumRatioPercent: (SHORT_SEGMENT_RATIO * 100).toFixed(0)
+      }
+    });
   });
 }
 
@@ -144,8 +179,42 @@ function computeOverlap(a, b) {
   return Math.min(aEnd, bEnd) - Math.max(aStart, bStart);
 }
 
-function buildPlateId(plate, index) {
-  const role = plate.role ? plate.role.toUpperCase() : "PLATE";
+function computeCoverage(plates) {
+  if (!plates.length) {
+    return 0;
+  }
+  const intervals = plates
+    .map(plate => {
+      const start = Number.isFinite(plate.x) ? plate.x : 0;
+      const end = start + (Number.isFinite(plate.width) ? plate.width : 0);
+      return [start, end];
+    })
+    .filter(pair => Number.isFinite(pair[0]) && Number.isFinite(pair[1]) && pair[1] >= pair[0]);
+
+  if (!intervals.length) {
+    return 0;
+  }
+
+  intervals.sort((a, b) => a[0] - b[0]);
+  let coverage = 0;
+  let [curStart, curEnd] = intervals[0];
+
+  for (let i = 1; i < intervals.length; i += 1) {
+    const [start, end] = intervals[i];
+    if (start <= curEnd) {
+      curEnd = Math.max(curEnd, end);
+    } else {
+      coverage += curEnd - curStart;
+      curStart = start;
+      curEnd = end;
+    }
+  }
+  coverage += curEnd - curStart;
+  return coverage;
+}
+
+function buildPlateId(plate, index, defaultRole) {
+  const role = plate.role ? plate.role.toUpperCase() : (defaultRole || "PLATE").toUpperCase();
   const x = Number.isFinite(plate.x) ? plate.x.toFixed(1) : "?";
   const y = Number.isFinite(plate.y) ? plate.y.toFixed(1) : "?";
   return `${role} #${index + 1} (x=${x}, y=${y})`;

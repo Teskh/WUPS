@@ -48,14 +48,14 @@ Validates NR (Nail Row) operations with three quality checks:
 
 ### Plate Mislabel Diagnostics (`plate-mislabel-diagnostics.js`)
 
-Detects misuse of OG/UG components based on the specification:
+Detects misuse of OG/UG components while allowing legitimate splicing:
 
-1. **Single Plate Per Role**: Flags when more than one OG (top plate) or UG (bottom plate) is present in the element
-2. **Span Coverage**: Warns when a plate is shorter than 80% of the element length (short plate typically indicates a mislabelled stud/blocking)
+1. **Coverage & Splice Count**: Union of plates per role should cover the element (>=80% by default) without excessive splicing
+2. **Short Segments**: Flags plate segments shorter than 20% of the element length (common when studs/blocking are mislabelled as plates)
 3. **Overlapping Plates**: Flags overlapping plates of the same role (multiple plates occupying the same y-plane)
 
 **Features:**
-- Works on any parsed model (no UI dependencies)
+- Respects legitimate splices (non-overlapping segments that together cover the element)
 - Reports per-check pass/fail counts and detailed failure messages
 - Compatible with `diagnostic-runner.js` for aggregated execution
 
