@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Batch WUP Diagnostics</title>
+  <link rel="stylesheet" href="batch-diagnostics.css">
+</head>
+<body>
+  <header class="page-hero">
+    <p class="eyebrow">Diagnostics</p>
+    <h1>Batch-run a folder of .WUP files</h1>
+    <p class="lede">
+    </p>
+  </header>
+
+  <main class="layout">
+    <section class="panel input-panel">
+      <div class="input-row">
+        <label class="field-label" for="directoryInput">Folder of .wup files</label>
+        <label class="file-field">
+          <input id="directoryInput" type="file" webkitdirectory multiple>
+          <span class="file-field-cta">Choose folder</span>
+          <span class="file-field-hint">We filter out non-.wup files automatically.</span>
+        </label>
+      </div>
+
+      <div id="selectionInfo" class="selection-info">No folder selected yet.</div>
+
+      <div class="actions">
+        <button id="runButton" type="button" disabled>Run diagnostics</button>
+        <button id="resetButton" class="ghost" type="button" disabled>Reset</button>
+      </div>
+
+      <div id="progressContainer" class="progress hidden" aria-live="polite">
+        <div class="progress-bar">
+          <span id="progressFill"></span>
+        </div>
+        <div id="progressText" class="progress-text">Waiting to start</div>
+      </div>
+
+      <div id="overallSummary" class="overall-summary muted"></div>
+    </section>
+
+    <section class="panel results-panel">
+      <div class="results-header">
+        <div>
+          <p class="eyebrow">Results</p>
+          <h2>Per-file diagnostic breakdown</h2>
+        </div>
+        <div class="legend">
+          <span class="pill ok">OK</span>
+          <span class="pill warn">Issues</span>
+          <span class="pill error">Error</span>
+        </div>
+      </div>
+      <div id="results" class="results-list empty-state">
+        <p>Load a folder to see file-by-file diagnostics.</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="batch-diagnostics.js"></script>
+</body>
+</html>
