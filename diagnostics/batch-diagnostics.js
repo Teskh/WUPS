@@ -233,21 +233,13 @@ function renderOverallSummary(aggregate) {
 
 function createFileCard(result) {
   const details = document.createElement("details");
-  details.className = "file-card";
+  const statusClass = result.status === "ok"
+    ? result.summary.checksFailed > 0 ? "status-warn" : "status-ok"
+    : "status-error";
+  details.className = `file-card ${statusClass}`;
   details.open = result.summary?.checksFailed > 0 || result.status === "error";
 
   const summary = document.createElement("summary");
-  const pill = document.createElement("span");
-  pill.className = "pill " + (result.status === "ok"
-    ? result.summary.checksFailed > 0
-      ? "warn"
-      : "ok"
-    : "error");
-  pill.textContent = result.status === "ok"
-    ? result.summary.checksFailed > 0
-      ? "Issues"
-      : "OK"
-    : "Error";
 
   const name = document.createElement("span");
   name.className = "file-name";
@@ -255,16 +247,15 @@ function createFileCard(result) {
 
   const statline = document.createElement("span");
   statline.className = "statline";
-  statline.textContent = result.status === "ok"
-    ? `${result.summary.checksPassed} passed / ${result.summary.checksFailed} failed`
-    : "Parser failed";
+  if (result.status === "ok") {
+    const total = result.summary.checksTotal;
+    const passed = result.summary.checksPassed;
+    statline.textContent = total === passed ? `${passed}/${total}` : `${passed}/${total}`;
+  } else {
+    statline.textContent = "parse error";
+  }
 
-  const summaryLeft = document.createElement("span");
-  summaryLeft.className = "summary-left";
-  summaryLeft.appendChild(pill);
-  summaryLeft.appendChild(name);
-
-  summary.appendChild(summaryLeft);
+  summary.appendChild(name);
   summary.appendChild(statline);
   details.appendChild(summary);
 
@@ -278,12 +269,9 @@ function createFileCard(result) {
     model.textContent = `Studs ${meta.studs || 0}, blocking ${meta.blocking || 0}, plates ${meta.plates || 0}, sheathing ${meta.sheathing || 0}, BOY ${meta.boyOperations || 0}, PAF ${meta.pafRoutings || 0}, nail rows ${meta.nailRows || 0}`;
     body.appendChild(model);
 
-    const diagList = document.createElement("div");
-    diagList.className = "diag-body";
     Object.values(result.diagnostics?.diagnostics || {}).forEach(diag => {
-      diagList.appendChild(createDiagnosticCard(diag));
+      body.appendChild(createDiagnosticGroup(diag));
     });
-    body.appendChild(diagList);
   } else {
     const error = document.createElement("div");
     error.className = "error-text";
@@ -295,101 +283,83 @@ function createFileCard(result) {
   return details;
 }
 
-function createDiagnosticCard(diag) {
-  const details = document.createElement("details");
-  details.className = "diagnostic-card";
-  const failedCount = diag.success && diag.results?.summary ? diag.results.summary.failed : 1;
-  details.open = failedCount > 0 || !diag.success;
+function createDiagnosticGroup(diag) {
+  const group = document.createElement("div");
+  group.className = "diag-group";
 
-  const summary = document.createElement("summary");
-  const pill = document.createElement("span");
-  pill.className = "pill " + (diag.success && failedCount === 0 ? "ok" : diag.success ? "warn" : "error");
-  pill.textContent = diag.success && failedCount === 0 ? "OK" : diag.success ? "Issues" : "Error";
+  const header = document.createElement("div");
+  header.className = "diag-header";
 
   const title = document.createElement("span");
   title.textContent = diag.name || diag.diagnosticKey || "Diagnostic";
 
-  const statline = document.createElement("span");
-  statline.className = "statline";
-  statline.textContent = diag.success && diag.results?.summary
-    ? `${diag.results.summary.passed} passed / ${diag.results.summary.failed} failed`
-    : diag.error || "Failed to run";
+  const stat = document.createElement("span");
+  stat.className = "diag-stat";
 
-  const left = document.createElement("span");
-  left.className = "summary-left";
-  left.appendChild(pill);
-  left.appendChild(title);
+  if (diag.success && diag.results?.summary) {
+    const { passed, total } = diag.results.summary;
+    stat.textContent = `${passed}/${total}`;
+    stat.classList.add(passed === total ? "all-pass" : "has-fail");
+  } else {
+    stat.textContent = "error";
+    stat.classList.add("is-error");
+  }
 
-  summary.appendChild(left);
-  summary.appendChild(statline);
-  details.appendChild(summary);
+  header.appendChild(title);
+  header.appendChild(stat);
+  group.appendChild(header);
 
   if (diag.success && diag.results?.checks) {
-    const body = document.createElement("div");
-    body.className = "diag-body";
-    diag.results.checks.forEach(check => body.appendChild(createCheckCard(check)));
-    details.appendChild(body);
+    const checkList = document.createElement("div");
+    checkList.className = "check-list";
+    diag.results.checks.forEach(check => {
+      checkList.appendChild(createCheckRow(check));
+    });
+    group.appendChild(checkList);
   } else if (!diag.success) {
     const error = document.createElement("div");
     error.className = "error-text";
     error.textContent = diag.error || "Diagnostic failed.";
-    details.appendChild(error);
+    group.appendChild(error);
   }
 
-  return details;
+  return group;
 }
 
-function createCheckCard(check) {
-  const details = document.createElement("details");
-  details.className = "check-card";
+function createCheckRow(check) {
+  const container = document.createElement("div");
+
+  const row = document.createElement("div");
+  row.className = "check-row";
+
   const failed = check.results.filter(r => !r.passed).length;
-  details.open = failed > 0;
+  const passed = check.results.length - failed;
+  const total = check.results.length;
 
-  const summary = document.createElement("summary");
-  const pill = document.createElement("span");
-  pill.className = "pill " + (failed === 0 ? "ok" : "warn");
-  pill.textContent = failed === 0 ? "OK" : "Issues";
+  const name = document.createElement("span");
+  name.className = "check-name";
+  name.textContent = check.name;
 
-  const title = document.createElement("span");
-  title.textContent = check.name;
+  const stat = document.createElement("span");
+  stat.className = "check-stat";
+  stat.textContent = `${passed}/${total}`;
+  stat.classList.add(failed === 0 ? "all-pass" : "has-fail");
 
-  const statline = document.createElement("span");
-  statline.className = "statline";
-  statline.textContent = `${check.results.length - failed} passed / ${failed} failed`;
+  row.appendChild(name);
+  row.appendChild(stat);
+  container.appendChild(row);
 
-  const left = document.createElement("span");
-  left.className = "summary-left";
-  left.appendChild(pill);
-  left.appendChild(title);
-
-  summary.appendChild(left);
-  summary.appendChild(statline);
-  details.appendChild(summary);
-
-  const body = document.createElement("div");
-  body.className = "check-body";
-
-  const desc = document.createElement("div");
-  desc.className = "muted";
-  desc.textContent = check.description;
-  body.appendChild(desc);
-
-  const failures = check.results.filter(r => !r.passed);
-  if (failures.length > 0) {
-    const list = document.createElement("ul");
-    failures.forEach(entry => {
+  if (failed > 0) {
+    row.classList.add("has-failures");
+    const failures = document.createElement("ul");
+    failures.className = "check-failures";
+    check.results.filter(r => !r.passed).forEach(entry => {
       const li = document.createElement("li");
       li.textContent = `${entry.id}: ${entry.message}`;
-      list.appendChild(li);
+      failures.appendChild(li);
     });
-    body.appendChild(list);
-  } else {
-    const ok = document.createElement("div");
-    ok.className = "muted";
-    ok.textContent = "All checks passed.";
-    body.appendChild(ok);
+    container.appendChild(failures);
   }
 
-  details.appendChild(body);
-  return details;
+  return container;
 }

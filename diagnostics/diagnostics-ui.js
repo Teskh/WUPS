@@ -351,8 +351,8 @@ function createCheckSection(check) {
       const endX = Number.isFinite(nr.end?.x) ? nr.end.x : "";
       const endY = Number.isFinite(nr.end?.y) ? nr.end.y : "";
       zoomButton = `<button class="zoom-to-nr" data-nr-id="${editorId}" data-layer="${layer}" data-start-x="${startX}" data-start-y="${startY}" data-end-x="${endX}" data-end-y="${endY}" title="Zoom to this NR">🔍</button>`;
-    } else if (result.position) {
-      // For outlets or other items with position data
+    } else if (!result.passed && result.position) {
+      // For outlets or other items with position data, only show zoom on failures
       const bx = Number.isFinite(result.position.x) ? result.position.x : (result.bounds?.center?.x ?? "");
       const by = Number.isFinite(result.position.y) ? result.position.y : (result.bounds?.center?.y ?? "");
       const cx = Number.isFinite(result.bounds?.center?.x) ? result.bounds.center.x : "";
