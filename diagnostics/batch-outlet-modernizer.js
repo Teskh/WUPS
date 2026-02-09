@@ -100,27 +100,27 @@ function handleFileSelection(event) {
 
     if (wupCount === 0) {
       selectionInfo.innerHTML = `
-        <span class="selection-warning">⚠️ No .wup files found in selection (${totalFiles} file${totalFiles > 1 ? "s" : ""} selected)</span>
+        <span class="selection-warning">⚠️ No se encontraron archivos .wup en la selección (${totalFiles} archivo${totalFiles > 1 ? "s" : ""} seleccionado${totalFiles > 1 ? "s" : ""})</span>
       `;
       processButton.disabled = true;
-      processButton.textContent = "Process Files";
+      processButton.textContent = "Procesar Archivos";
     } else if (wupCount < totalFiles) {
       selectionInfo.innerHTML = `
-        <span class="selection-success">✓ Found ${wupCount} .wup file${wupCount > 1 ? "s" : ""} (filtered from ${totalFiles} total file${totalFiles > 1 ? "s" : ""})</span>
+        <span class="selection-success">✓ Se encontr${wupCount > 1 ? "aron" : "ó"} ${wupCount} archivo${wupCount > 1 ? "s" : ""} .wup (filtrado${wupCount > 1 ? "s" : ""} de ${totalFiles} archivo${totalFiles > 1 ? "s" : ""} total${totalFiles > 1 ? "es" : ""})</span>
       `;
       processButton.disabled = false;
-      processButton.textContent = `Process ${wupCount} .wup File${wupCount > 1 ? "s" : ""}`;
+      processButton.textContent = `Procesar ${wupCount} Archivo${wupCount > 1 ? "s" : ""} .wup`;
     } else {
       selectionInfo.innerHTML = `
-        <span class="selection-success">✓ Selected ${wupCount} .wup file${wupCount > 1 ? "s" : ""}</span>
+        <span class="selection-success">✓ Seleccionado${wupCount > 1 ? "s" : ""} ${wupCount} archivo${wupCount > 1 ? "s" : ""} .wup</span>
       `;
       processButton.disabled = false;
-      processButton.textContent = `Process ${wupCount} File${wupCount > 1 ? "s" : ""}`;
+      processButton.textContent = `Procesar ${wupCount} Archivo${wupCount > 1 ? "s" : ""}`;
     }
   } else {
     selectionInfo.classList.add("hidden");
     processButton.disabled = true;
-    processButton.textContent = "Process Files";
+    processButton.textContent = "Procesar Archivos";
   }
 }
 
@@ -141,14 +141,14 @@ async function handleProcess() {
   // Process each file
   for (let i = 0; i < selectedFiles.length; i++) {
     const file = selectedFiles[i];
-    updateProgress(i, selectedFiles.length, `Processing ${file.name}...`);
+    updateProgress(i, selectedFiles.length, `Procesando ${file.name}...`);
 
     const result = await processFile(file);
     processedResults.push(result);
   }
 
   // Update to completion
-  updateProgress(selectedFiles.length, selectedFiles.length, "Processing complete");
+  updateProgress(selectedFiles.length, selectedFiles.length, "Procesamiento completado");
 
   // Show results
   displayResults();
@@ -160,7 +160,7 @@ async function handleProcess() {
 function updateProgress(current, total, message) {
   const percentage = total > 0 ? (current / total) * 100 : 0;
   progressFill.style.width = `${percentage}%`;
-  progressText.textContent = `${current} / ${total} files processed`;
+  progressText.textContent = `${current} / ${total} archivos procesados`;
 
   if (message) {
     progressText.textContent += ` - ${message}`;
@@ -191,7 +191,7 @@ async function processFile(file) {
     // Parse WUP
     const model = parseWup(content);
     if (!model) {
-      throw new Error("Failed to parse WUP file");
+      throw new Error("Error al analizar el archivo WUP");
     }
 
     // Count total outlets first
@@ -231,7 +231,7 @@ async function processFile(file) {
       const outlet = legacyOutlets[0];
 
       if (!outlet.replacement) {
-        console.error("Outlet missing replacement data, skipping");
+        console.error("Faltan datos de reemplazo para la salida, omitiendo");
         break;
       }
 
@@ -263,7 +263,7 @@ async function processFile(file) {
         result.outletsModernized++;
 
       } catch (err) {
-        console.error(`Failed to modernize outlet ${outlet.id}:`, err);
+        console.error(`Error al modernizar la salida ${outlet.id}:`, err);
         // Continue to try other outlets even if one fails
         break;
       }
@@ -304,7 +304,7 @@ function replaceOutletInModel(model, replacementData, modernRoutingData) {
   );
 
   if (!targetRouting) {
-    console.error("Could not find target routing with id:", boxId);
+    console.error("No se pudo encontrar el ruteo objetivo con id:", boxId);
     return;
   }
 
@@ -323,7 +323,7 @@ function replaceOutletInModel(model, replacementData, modernRoutingData) {
   }
 
   if (statementIndexSet.size === 0) {
-    console.error("No statement indices found for routings to remove");
+    console.error("No se encontraron índices de declaración para los ruteos a eliminar");
     return;
   }
 
@@ -364,7 +364,7 @@ function replaceOutletInModel(model, replacementData, modernRoutingData) {
 
   const reparsed = parseWup(updatedText);
   if (!reparsed) {
-    console.error("Failed to re-parse WUP after outlet replacement");
+    console.error("Error al volver a analizar WUP después del reemplazo de salida");
     return;
   }
 
@@ -394,27 +394,27 @@ function displayResults() {
   summary.innerHTML = `
     <div class="summary-grid">
       <div class="summary-item">
-        <span class="summary-label">Total Files:</span>
+        <span class="summary-label">Archivos Totales:</span>
         <span class="summary-value">${totalFiles}</span>
       </div>
       <div class="summary-item">
-        <span class="summary-label">Files Modified:</span>
+        <span class="summary-label">Archivos Modificados:</span>
         <span class="summary-value success">${filesModified}</span>
       </div>
       <div class="summary-item">
-        <span class="summary-label">Files with Legacy Outlets:</span>
+        <span class="summary-label">Archivos con Salidas Legadas:</span>
         <span class="summary-value">${filesWithOutlets}</span>
       </div>
       <div class="summary-item">
-        <span class="summary-label">Legacy Outlets Found:</span>
+        <span class="summary-label">Salidas Legadas Encontradas:</span>
         <span class="summary-value">${totalOutletsFound}</span>
       </div>
       <div class="summary-item">
-        <span class="summary-label">Outlets Modernized:</span>
+        <span class="summary-label">Salidas Modernizadas:</span>
         <span class="summary-value success">${totalOutletsModernized}</span>
       </div>
       <div class="summary-item">
-        <span class="summary-label">Failed:</span>
+        <span class="summary-label">Fallidos:</span>
         <span class="summary-value ${failedFiles > 0 ? 'error' : ''}">${failedFiles}</span>
       </div>
     </div>
@@ -424,7 +424,7 @@ function displayResults() {
   fileResults.innerHTML = processedResults.map(result => {
     const statusClass = result.success ? 'success' : 'error';
     const statusText = result.success
-      ? (result.outletsModernized > 0 ? `✓ Modified (${result.outletsModernized} outlets)` : '✓ No changes needed')
+      ? (result.outletsModernized > 0 ? `✓ Modificado (${result.outletsModernized} salidas)` : '✓ No requiere cambios')
       : `✗ Error: ${result.error}`;
 
     return `
@@ -435,9 +435,9 @@ function displayResults() {
         </div>
         ${result.legacyOutletsFound > 0 ? `
           <div class="file-result-details">
-            <p>Legacy outlets found: ${result.legacyOutletsFound}</p>
+            <p>Salidas legadas encontradas: ${result.legacyOutletsFound}</p>
             ${result.replacements.map(r =>
-              `<p class="replacement-detail">• ${r.id} - ${r.orientation} outlet at (${r.center.x.toFixed(1)}, ${r.center.y.toFixed(1)})</p>`
+              `<p class="replacement-detail">• ${r.id} - salida ${r.orientation === 'horizontal' ? 'horizontal' : 'vertical'} en (${r.center.x.toFixed(1)}, ${r.center.y.toFixed(1)})</p>`
             ).join('')}
           </div>
         ` : ''}
@@ -457,7 +457,7 @@ function handleDownloadAll() {
   const modifiedFiles = processedResults.filter(r => r.success && r.outletsModernized > 0);
 
   if (modifiedFiles.length === 0) {
-    alert("No modified files to download");
+    alert("No hay archivos modificados para descargar");
     return;
   }
 
@@ -473,7 +473,7 @@ function handleDownloadAll() {
 function handleDownloadReport() {
   const report = generateReport();
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
-  downloadFile(report, `outlet-modernizer-report-${timestamp}.txt`);
+  downloadFile(report, `reporte-modernizador-salidas-${timestamp}.txt`);
 }
 
 /**
@@ -484,40 +484,41 @@ function generateReport() {
   const filesModified = processedResults.filter(r => r.outletsModernized > 0).length;
   const totalOutlets = processedResults.reduce((sum, r) => sum + r.outletsModernized, 0);
 
-  let report = "BATCH OUTLET MODERNIZER REPORT\n";
+  let report = "REPORTE DEL MODERNIZADOR DE SALIDAS EN LOTE\n";
   report += "=".repeat(60) + "\n\n";
-  report += `Generated: ${new Date().toLocaleString()}\n\n`;
-  report += `Total Files Processed: ${totalFiles}\n`;
-  report += `Files Modified: ${filesModified}\n`;
-  report += `Total Outlets Modernized: ${totalOutlets}\n\n`;
+  report += `Generado: ${new Date().toLocaleString()}\n\n`;
+  report += `Archivos Totales Procesados: ${totalFiles}\n`;
+  report += `Archivos Modificados: ${filesModified}\n`;
+  report += `Total de Salidas Modernizadas: ${totalOutlets}\n\n`;
   report += "=".repeat(60) + "\n\n";
 
   processedResults.forEach(result => {
-    report += `File: ${result.filename}\n`;
+    report += `Archivo: ${result.filename}\n`;
     report += "-".repeat(60) + "\n";
 
     if (!result.success) {
-      report += `Status: FAILED\n`;
+      report += `Estado: FALLIDO\n`;
       report += `Error: ${result.error}\n\n`;
       return;
     }
 
     if (result.outletsModernized === 0) {
-      report += `Status: No changes needed\n`;
-      report += `Legacy outlets found: ${result.legacyOutletsFound}\n\n`;
+      report += `Estado: No requiere cambios\n`;
+      report += `Salidas legadas encontradas: ${result.legacyOutletsFound}\n\n`;
       return;
     }
 
-    report += `Status: SUCCESS\n`;
-    report += `Legacy outlets found: ${result.legacyOutletsFound}\n`;
-    report += `Outlets modernized: ${result.outletsModernized}\n`;
+    report += `Estado: ÉXITO\n`;
+    report += `Salidas legadas encontradas: ${result.legacyOutletsFound}\n`;
+    report += `Salidas modernizadas: ${result.outletsModernized}\n`;
 
     if (result.replacements.length > 0) {
-      report += `\nReplacements:\n`;
+      report += `\nReemplazos:\n`;
       result.replacements.forEach(r => {
+        const orientationEs = r.orientation === "vertical" ? "vertical" : "horizontal";
         report += `  - ${r.id}\n`;
-        report += `    Orientation: ${r.orientation}\n`;
-        report += `    Center: (${r.center.x.toFixed(1)}, ${r.center.y.toFixed(1)})\n`;
+        report += `    Orientación: ${orientationEs}\n`;
+        report += `    Centro: (${r.center.x.toFixed(1)}, ${r.center.y.toFixed(1)})\n`;
       });
     }
 
@@ -551,7 +552,7 @@ function handleReset() {
   fileInput.value = "";
   directoryInput.value = "";
   processButton.disabled = true;
-  processButton.textContent = "Process Files";
+  processButton.textContent = "Procesar Archivos";
   resultsSection.classList.add("hidden");
   progressSection.classList.add("hidden");
   selectionInfo.classList.add("hidden");
@@ -564,7 +565,7 @@ function readFileAsText(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = e => resolve(e.target.result);
-    reader.onerror = e => reject(new Error("Failed to read file"));
+    reader.onerror = e => reject(new Error("Error al leer el archivo"));
     reader.readAsText(file);
   });
 }

@@ -1,79 +1,114 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Batch Outlet Modernizer</title>
+  <title>Modernizador de Salidas en Lote</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="batch-outlet-modernizer.css">
 </head>
 <body>
+  <div class="app-background"></div>
   <div class="container">
     <header>
-      <h1>Batch Outlet Modernizer</h1>
-      <p class="subtitle">Transform legacy electrical outlets to modern format</p>
+      <h1>Modernizador de Cajas Eléctricas</h1>
+      <p class="subtitle">Transforma cajas eléctricas a un formato eficiente</p>
     </header>
 
     <main>
-      <section class="input-section">
-        <h2>Select Files</h2>
+      <section class="card input-section">
+        <div class="section-header">
+          <h2>Seleccionar Archivos</h2>
+          <span class="step-badge">Paso 1</span>
+        </div>
+        
         <div class="input-options">
-          <div class="input-group">
-            <label for="fileInput">
+          <!-- Opción de Archivo Individual -->
+          <div class="input-group" id="singleFileGroup">
+            <label class="radio-label" for="singleFileRadio">
               <input type="radio" name="inputType" id="singleFileRadio" value="single" checked>
-              Single WUP File
+              <span class="radio-custom"></span>
+              <span class="radio-text">Archivo WUP Individual</span>
             </label>
-            <input
-              type="file"
-              id="fileInput"
-              accept=".wup"
-              disabled
-            >
+            <div class="file-input-wrapper">
+              <input
+                type="file"
+                id="fileInput"
+                accept=".wup"
+                disabled
+                class="modern-file-input"
+              >
+            </div>
           </div>
 
-          <div class="input-group">
-            <label for="directoryInput">
+          <!-- Opción de Directorio -->
+          <div class="input-group" id="directoryGroup">
+            <label class="radio-label" for="directoryRadio">
               <input type="radio" name="inputType" id="directoryRadio" value="directory">
-              Directory (filters .wup files only)
+              <span class="radio-custom"></span>
+              <span class="radio-text">Directorio (Lote)</span>
             </label>
-            <input
-              type="file"
-              id="directoryInput"
-              webkitdirectory
-              directory
-              multiple
-              disabled
-            >
-            <p class="input-hint">Note: Browser will show all files, but only .wup files will be processed</p>
+            <div class="file-input-wrapper">
+              <input
+                type="file"
+                id="directoryInput"
+                webkitdirectory
+                directory
+                multiple
+                disabled
+                class="modern-file-input"
+              >
+              <p class="input-hint">Nota: El navegador mostrará todos los archivos, pero solo se procesarán archivos .wup</p>
+            </div>
           </div>
         </div>
 
         <div id="selectionInfo" class="selection-info hidden"></div>
 
-        <button id="processButton" type="button" disabled>Process Files</button>
+        <button id="processButton" type="button" class="primary-button" disabled>Procesar Archivos</button>
       </section>
 
-      <section class="progress-section hidden" id="progressSection">
-        <h2>Processing</h2>
-        <div class="progress-bar">
-          <div class="progress-fill" id="progressFill"></div>
+      <section class="card progress-section hidden" id="progressSection">
+        <div class="section-header">
+          <h2>Procesando</h2>
+          <span class="step-badge processing">Paso 2</span>
         </div>
-        <p class="progress-text" id="progressText">0 / 0 files processed</p>
+        <div class="progress-bar-container">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+        </div>
+        <p class="progress-text" id="progressText">0 / 0 archivos procesados</p>
       </section>
 
-      <section class="results-section hidden" id="resultsSection">
-        <h2>Results</h2>
+      <section class="card results-section hidden" id="resultsSection">
+        <div class="section-header">
+          <h2>Resultados</h2>
+          <span class="step-badge complete">Completado</span>
+        </div>
         <div class="summary" id="summary"></div>
-        <div class="file-results" id="fileResults"></div>
+        <div class="file-results-container">
+          <h3>Detalles</h3>
+          <div class="file-results" id="fileResults"></div>
+        </div>
         <div class="actions">
-          <button id="downloadAllButton" type="button">Download All Modified Files</button>
-          <button id="downloadReportButton" type="button">Download Report</button>
-          <button id="resetButton" type="button">Process More Files</button>
+          <button id="downloadAllButton" type="button" class="action-button download">
+            <span class="icon">⬇</span> Descargar Archivos Modificados
+          </button>
+          <button id="downloadReportButton" type="button" class="action-button report">
+            <span class="icon">📄</span> Descargar Reporte
+          </button>
+          <button id="resetButton" type="button" class="action-button reset">
+            <span class="icon">↻</span> Procesar Más Archivos
+          </button>
         </div>
       </section>
     </main>
 
     <footer>
-      <p>Part of the WUP Diagnostics Suite</p>
+      <p>Parte de la Suite de Diagnóstico WUP</p>
     </footer>
   </div>
 
