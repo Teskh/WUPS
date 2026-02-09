@@ -63,6 +63,7 @@ export class FrameViewer {
       pli: true,
       pla: true
     };
+    this.availableLayerKeys = ["structure", "pli", "pla"];
 
     this.layerGroups = {
       structure: new THREE.Group(),
@@ -211,6 +212,7 @@ export class FrameViewer {
       wallSide
     );
     this.sheathingSurfaces = sheathingSurfaces;
+    this.rebuildLayerRegistry(model);
 
     const scale = calculateScale(wallWidth, wallHeight);
 
@@ -283,18 +285,25 @@ export class FrameViewer {
       if (!mesh) {
         continue;
       }
-      const layer = typeof panel?.layer === "string" ? panel.layer : panel?.faceDirection >= 0 ? "pli" : "pla";
-      const target = layer === "pla" ? this.groups.plaSheathing : this.groups.pliSheathing;
+      const layerBase = normalizeLayerFamily(mesh.userData?.layerBase)
+        ?? normalizeLayerFamily(panel?.layer)
+        ?? (panel?.faceDirection >= 0 ? "pli" : "pla");
+      const target = layerBase === "pla" ? this.groups.plaSheathing : this.groups.pliSheathing;
       target.add(mesh);
     }
 
     for (const row of model.nailRows ?? []) {
       const layer = row?.layer === "pla" ? "pla" : "pli";
-      const mesh = createNailRowMesh(row, { ...baseContext, layer });
+      const mesh = createNailRowMesh(row, {
+        ...baseContext,
+        layer,
+        layerCommand: row?.layerCommand ?? null,
+        layerIndex: row?.layerIndex ?? null
+      });
       if (!mesh) {
         continue;
       }
-      const target = layer === "pla" ? this.groups.plaNailRows : this.groups.pliNailRows;
+      const target = mesh.userData?.layerBase === "pla" ? this.groups.plaNailRows : this.groups.pliNailRows;
       target.add(mesh);
     }
 
@@ -310,17 +319,22 @@ export class FrameViewer {
       const meshes = createPafMeshes(routing, {
         ...baseContext,
         sheathingSurfaces,
-        layer: overrideLayer ?? undefined
+        layer: overrideLayer ?? undefined,
+        layerCommand: routing?.layerCommand ?? null,
+        layerIndex: routing?.layerIndex ?? null
       });
       for (const mesh of meshes) {
         if (!mesh) {
           continue;
         }
-        const meshLayer = mesh.userData?.layer === "pla" ? "pla" : "pli";
+        const meshLayer = mesh.userData?.layerBase === "pla" ? "pla" : "pli";
         const target = meshLayer === "pla" ? this.groups.plaPafRoutings : this.groups.pliPafRoutings;
         target.add(mesh);
       }
     }
+
+    this.applyLayerVisibility();
+    this.notifyLayerVisibilityChange();
 
     if (maintainCamera) {
       if (savedCameraState && savedCameraState.projection) {
@@ -758,6 +772,19 @@ export class FrameViewer {
     }
   }
 
+  rebuildLayerRegistry(model) {
+    const nextKeys = collectAvailableLayerKeys(model);
+    this.availableLayerKeys = sortLayerKeys(nextKeys);
+
+    const previous = this.layerVisibility ?? {};
+    const nextVisibility = {};
+    for (const key of this.availableLayerKeys) {
+      nextVisibility[key] = previous[key] !== false;
+    }
+
+    this.layerVisibility = nextVisibility;
+  }
+
   applyLayerVisibility() {
     if (!this.layerGroups) {
       return;
@@ -769,21 +796,60 @@ export class FrameViewer {
       const visible = this.layerVisibility?.[layer] !== false;
       group.visible = visible;
     }
+    this.applyObjectLayerVisibility();
     this.requestRender();
   }
 
+  isObjectVisibleByLayer(object) {
+    if (!object?.userData) {
+      return true;
+    }
+    const key = normalizeLayerTokenForViewer(object.userData.layer);
+    const base = normalizeLayerFamily(object.userData.layerBase ?? key);
+    if (base && this.layerVisibility?.[base] === false) {
+      return false;
+    }
+    if (key && this.layerVisibility?.[key] === false) {
+      return false;
+    }
+    return true;
+  }
+
+  applyObjectLayerVisibility() {
+    const groups = [
+      this.groups?.pliSheathing,
+      this.groups?.plaSheathing,
+      this.groups?.pliNailRows,
+      this.groups?.plaNailRows,
+      this.groups?.pliPafRoutings,
+      this.groups?.plaPafRoutings
+    ].filter(group => group);
+
+    for (const group of groups) {
+      for (const child of group.children) {
+        if (!child?.userData?.kind) {
+          continue;
+        }
+        child.visible = this.isObjectVisibleByLayer(child);
+      }
+    }
+  }
+
   setLayerVisibility(layer, visible) {
-    if (!this.layerGroups?.[layer]) {
+    const normalizedLayer = normalizeLayerTokenForViewer(layer);
+    if (!normalizedLayer || !this.layerVisibility || !(normalizedLayer in this.layerVisibility)) {
       return;
     }
     const normalized = !!visible;
-    if (this.layerVisibility[layer] === normalized) {
+    if (this.layerVisibility[normalizedLayer] === normalized) {
       return;
     }
-    this.layerVisibility[layer] = normalized;
-    this.layerGroups[layer].visible = normalized;
-    const hoveredLayer = this.hoveredObject?.userData?.layer ?? null;
-    if (!normalized && hoveredLayer === layer) {
+    this.layerVisibility[normalizedLayer] = normalized;
+    if (this.layerGroups?.[normalizedLayer]) {
+      this.layerGroups[normalizedLayer].visible = normalized;
+    }
+    this.applyObjectLayerVisibility();
+    if (this.hoveredObject && !this.isObjectVisibleByLayer(this.hoveredObject)) {
       this.clearHoverState();
     } else {
       this.requestRender();
@@ -792,11 +858,14 @@ export class FrameViewer {
   }
 
   getLayerVisibility() {
-    return {
-      structure: this.layerVisibility.structure !== false,
-      pli: this.layerVisibility.pli !== false,
-      pla: this.layerVisibility.pla !== false
-    };
+    const visibility = {};
+    const keys = Array.isArray(this.availableLayerKeys) && this.availableLayerKeys.length > 0
+      ? this.availableLayerKeys
+      : Object.keys(this.layerVisibility ?? {});
+    for (const key of keys) {
+      visibility[key] = this.layerVisibility?.[key] !== false;
+    }
+    return visibility;
   }
 
   getScale() {
@@ -966,16 +1035,19 @@ export class FrameViewer {
       return;
     }
 
-    const layer = typeof details.layer === "string" && details.layer
-      ? details.layer
-      : (matchedRow?.layer ?? "pli");
-    const faceDir = resolveLayerFaceDirectionForViewer(layer, this.wallSide ?? 1);
+    const layerDescriptor = resolveLayerDescriptorForViewer({
+      layer: details.layer ?? matchedRow?.layer ?? "pli",
+      layerCommand: details.layerCommand ?? matchedRow?.layerCommand ?? null,
+      layerIndex: details.layerIndex ?? matchedRow?.layerIndex ?? null
+    });
+    const faceDir = resolveLayerFaceDirectionForViewer(layerDescriptor.base, this.wallSide ?? 1);
     const wallThickness = Number.isFinite(this.wallThickness) ? this.wallThickness : 90;
     const scale = this.cachedDimensions?.scale || 1;
     focusPoint.z = computeNailRowZForViewer(
       wallThickness,
       faceDir,
-      this.sheathingSurfaces
+      this.sheathingSurfaces,
+      layerDescriptor
     ) * scale;
 
     this.zoomToWorldPosition(focusPoint);
@@ -1022,6 +1094,13 @@ export class FrameViewer {
                     break;
                   }
                 }
+              } else if (segment.kind === "polyline" && segment.points) {
+                for (const point of segment.points) {
+                  if (Math.abs(point.x - x) < tolerance && Math.abs(point.y - y) < tolerance) {
+                    isNear = true;
+                    break;
+                  }
+                }
               } else if (segment.kind === "circle" && segment.position) {
                 // Check if circle position is near the target
                 if (Math.abs(segment.position.x - x) < tolerance && Math.abs(segment.position.y - y) < tolerance) {
@@ -1046,11 +1125,16 @@ export class FrameViewer {
       console.warn(`No mesh found near position x=${x}, y=${y}`);
       // Fallback: zoom to the computed world target (scaled to scene)
       // Calculate proper Z based on layer
-      const resolvedLayer = typeof layer === "string" && layer ? layer : "pli";
-      const faceDir = resolveLayerFaceDirectionForViewer(resolvedLayer, this.wallSide ?? 1);
+      const layerDescriptor = resolveLayerDescriptorForViewer({ layer: layer ?? "pli" });
+      const faceDir = resolveLayerFaceDirectionForViewer(layerDescriptor.base, this.wallSide ?? 1);
       const wallThickness = Number.isFinite(this.wallThickness) ? this.wallThickness : 90;
       const scale = this.cachedDimensions?.scale || 1;
-      const surfaceZ = computeNailRowZForViewer(wallThickness, faceDir, this.sheathingSurfaces) * scale;
+      const surfaceZ = computeNailRowZForViewer(
+        wallThickness,
+        faceDir,
+        this.sheathingSurfaces,
+        layerDescriptor
+      ) * scale;
 
       if (worldTarget) {
         worldTarget.z = surfaceZ;
@@ -1080,11 +1164,20 @@ export class FrameViewer {
       const worldCenter = this.modelPointToWorld({ x: centerX, y: centerY });
       if (worldCenter) {
         // Calculate Z based on layer
-        const meshLayer = targetMesh.userData?.layer ?? "pli";
-        const faceDir = resolveLayerFaceDirectionForViewer(meshLayer, this.wallSide ?? 1);
+        const layerDescriptor = resolveLayerDescriptorForViewer({
+          layer: targetMesh.userData?.layer ?? "pli",
+          layerCommand: targetMesh.userData?.layerCommand ?? null,
+          layerIndex: targetMesh.userData?.layerIndex ?? null
+        });
+        const faceDir = resolveLayerFaceDirectionForViewer(layerDescriptor.base, this.wallSide ?? 1);
         const wallThickness = Number.isFinite(this.wallThickness) ? this.wallThickness : 90;
         const scale = this.cachedDimensions?.scale || 1;
-        worldCenter.z = computeNailRowZForViewer(wallThickness, faceDir, this.sheathingSurfaces) * scale;
+        worldCenter.z = computeNailRowZForViewer(
+          wallThickness,
+          faceDir,
+          this.sheathingSurfaces,
+          layerDescriptor
+        ) * scale;
         worldPos = worldCenter;
       } else {
         targetMesh.getWorldPosition(worldPos);
@@ -1158,26 +1251,194 @@ export class FrameViewer {
 
 function resolveLayerFaceDirectionForViewer(layer, wallSide) {
   const wallDir = wallSide >= 0 ? 1 : -1;
-  if (typeof layer !== "string") {
+  const normalized = normalizeLayerTokenForViewer(layer);
+  if (!normalized) {
     return wallDir;
   }
-  return layer.toLowerCase() === "pla" ? -wallDir : wallDir;
+  if (normalized.startsWith("pla")) {
+    return -wallDir;
+  }
+  if (normalized.startsWith("pli")) {
+    return wallDir;
+  }
+  return wallDir;
 }
 
-function computeNailRowZForViewer(wallThickness, faceDir, sheathingSurfaces) {
+function computeNailRowZForViewer(wallThickness, faceDir, sheathingSurfaces, layerReference = null) {
   const thickness = Number.isFinite(wallThickness) ? wallThickness : 90;
   const epsilon = 1.2;
   const dir = faceDir >= 0 ? 1 : -1;
   let surfaceZ = null;
-  if (faceDir >= 0) {
+  const hasLayerReference =
+    layerReference !== null &&
+    layerReference !== undefined &&
+    (typeof layerReference !== "object" || Object.keys(layerReference).length > 0);
+  if (hasLayerReference) {
+    const descriptor = resolveLayerDescriptorForViewer(layerReference);
+    const layerKey = descriptor.key;
+    if (layerKey && Number.isFinite(sheathingSurfaces?.byLayer?.[layerKey])) {
+      surfaceZ = sheathingSurfaces.byLayer[layerKey];
+    }
+  }
+  if (!Number.isFinite(surfaceZ) && faceDir >= 0) {
     surfaceZ = sheathingSurfaces?.positive ?? null;
-  } else {
+  } else if (!Number.isFinite(surfaceZ)) {
     surfaceZ = sheathingSurfaces?.negative ?? null;
   }
   if (!Number.isFinite(surfaceZ)) {
     surfaceZ = dir * (thickness / 2);
   }
   return surfaceZ + dir * epsilon;
+}
+
+function normalizeLayerTokenForViewer(raw) {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized || null;
+}
+
+function normalizeLayerFamily(raw) {
+  const normalized = normalizeLayerTokenForViewer(raw);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.startsWith("pla")) {
+    return "pla";
+  }
+  if (normalized.startsWith("pli")) {
+    return "pli";
+  }
+  if (normalized === "structure") {
+    return "structure";
+  }
+  return null;
+}
+
+function parseLayerTokenForViewer(raw) {
+  const normalized = normalizeLayerTokenForViewer(raw);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "structure") {
+    return {
+      base: "structure",
+      index: null,
+      key: "structure",
+      command: "STRUCTURE"
+    };
+  }
+  const match = normalized.match(/^(pli|pla)(\d+)?$/);
+  if (!match) {
+    return null;
+  }
+  const base = match[1];
+  const index = match[2] != null ? Number.parseInt(match[2], 10) : null;
+  const hasIndex = Number.isFinite(index);
+  return {
+    base,
+    index: hasIndex ? index : null,
+    key: hasIndex ? `${base}${index}` : base,
+    command: hasIndex ? `${base.toUpperCase()}${index}` : base.toUpperCase()
+  };
+}
+
+function resolveLayerDescriptorForViewer(input = null) {
+  const ref = input && typeof input === "object" ? input : { layer: input };
+  const fromCommand = parseLayerTokenForViewer(ref.layerCommand) ?? parseLayerTokenForViewer(ref.command);
+  const fromLayer =
+    parseLayerTokenForViewer(ref.layer) ??
+    parseLayerTokenForViewer(ref.key) ??
+    parseLayerTokenForViewer(ref.base);
+  const rawIndexHint = Number.isFinite(ref.layerIndex) ? ref.layerIndex : ref.index;
+  const indexHintRaw = Number.isFinite(rawIndexHint) ? Math.trunc(rawIndexHint) : null;
+  const indexHint = Number.isFinite(indexHintRaw) && indexHintRaw >= 0 ? indexHintRaw : null;
+  const base = fromCommand ?? fromLayer ?? parseLayerTokenForViewer("pli");
+  if (!base) {
+    return {
+      base: "pli",
+      index: null,
+      key: "pli",
+      command: "PLI"
+    };
+  }
+  const resolvedIndex = base.index ?? indexHint;
+  if (base.base === "structure") {
+    return base;
+  }
+  if (Number.isFinite(resolvedIndex)) {
+    return {
+      base: base.base,
+      index: resolvedIndex,
+      key: `${base.base}${resolvedIndex}`,
+      command: `${base.base.toUpperCase()}${resolvedIndex}`
+    };
+  }
+  return {
+    base: base.base,
+    index: null,
+    key: base.base,
+    command: base.base.toUpperCase()
+  };
+}
+
+function extractLayerKeyFromEntity(entity, fallbackSide = null) {
+  const descriptor = resolveLayerDescriptorForViewer({
+    layer: entity?.layer ?? fallbackSide ?? null,
+    layerCommand: entity?.layerCommand ?? null,
+    layerIndex: entity?.layerIndex ?? null
+  });
+  return descriptor.key;
+}
+
+function collectAvailableLayerKeys(model) {
+  const keys = new Set(["structure", "pli", "pla"]);
+  const panels = Array.isArray(model?.sheathing) ? model.sheathing : [];
+  const rows = Array.isArray(model?.nailRows) ? model.nailRows : [];
+  const routings = Array.isArray(model?.pafRoutings) ? model.pafRoutings : [];
+
+  for (const panel of panels) {
+    const key = extractLayerKeyFromEntity(panel, panel?.faceDirection >= 0 ? "pli" : "pla");
+    if (key) {
+      keys.add(key);
+    }
+  }
+  for (const row of rows) {
+    const key = extractLayerKeyFromEntity(row, row?.layer);
+    if (key) {
+      keys.add(key);
+    }
+  }
+  for (const routing of routings) {
+    const key = extractLayerKeyFromEntity(routing, routing?.layer);
+    if (key) {
+      keys.add(key);
+    }
+  }
+
+  return keys;
+}
+
+function sortLayerKeys(keys) {
+  const list = Array.from(keys ?? []);
+  const rank = key => {
+    if (key === "structure") return 0;
+    if (key === "pli") return 1;
+    if (key === "pla") return 2;
+    const match = key.match(/^(pli|pla)(\d+)$/);
+    if (!match) return 99;
+    const sideRank = match[1] === "pli" ? 3 : 4;
+    const index = Number.parseInt(match[2], 10);
+    return sideRank * 100 + index;
+  };
+  return list.sort((a, b) => {
+    const rankDiff = rank(a) - rank(b);
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
+    return a.localeCompare(b);
+  });
 }
 
 function resolvePickTarget(object) {

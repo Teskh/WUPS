@@ -6,7 +6,29 @@ function normalizeLayerName(raw) {
   if (value === "structure" || value === "pli" || value === "pla") {
     return value;
   }
+  if (/^(pli|pla)\d+$/.test(value)) {
+    return value;
+  }
   return null;
+}
+
+function getLayerLabel(layer) {
+  if (layer === "structure") {
+    return "Structure & BOY";
+  }
+  if (layer === "pli") {
+    return "All PLI";
+  }
+  if (layer === "pla") {
+    return "All PLA";
+  }
+  const match = layer.match(/^(pli|pla)(\d+)$/);
+  if (match) {
+    const side = match[1].toUpperCase();
+    const index = match[2];
+    return `${side}${index} sheathing, NR, PAF`;
+  }
+  return layer.toUpperCase();
 }
 
 export function setupLayerControls({ viewer, container } = {}) {
@@ -14,11 +36,35 @@ export function setupLayerControls({ viewer, container } = {}) {
     return () => {};
   }
 
-  const checkboxes = Array.from(
-    container.querySelectorAll('input[type="checkbox"][data-layer]')
-  );
-  if (checkboxes.length === 0) {
-    return () => {};
+  const legend = container.querySelector("legend") ?? null;
+
+  const renderControls = visibility => {
+    const keys = Object.keys(visibility ?? {});
+    if (keys.length === 0) {
+      return;
+    }
+
+    for (const label of Array.from(container.querySelectorAll("label"))) {
+      label.remove();
+    }
+
+    for (const layer of keys) {
+      const normalized = normalizeLayerName(layer);
+      if (!normalized) {
+        continue;
+      }
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.layer = normalized;
+      input.checked = visibility[normalized] !== false;
+      label.append(input, ` ${getLayerLabel(normalized)}`);
+      if (legend && legend.parentElement === container) {
+        container.appendChild(label);
+      } else {
+        container.prepend(label);
+      }
+    }
   }
 
   const syncFromViewer = visibility => {
@@ -28,16 +74,7 @@ export function setupLayerControls({ viewer, container } = {}) {
     if (!visibility) {
       return;
     }
-    for (const input of checkboxes) {
-      const layer = normalizeLayerName(input.dataset.layer);
-      if (!layer) {
-        continue;
-      }
-      const desired = Object.prototype.hasOwnProperty.call(visibility, layer)
-        ? !!visibility[layer]
-        : true;
-      input.checked = desired;
-    }
+    renderControls(visibility);
   };
 
   const handleChange = event => {
@@ -52,9 +89,7 @@ export function setupLayerControls({ viewer, container } = {}) {
     viewer.setLayerVisibility(layer, target.checked);
   };
 
-  for (const input of checkboxes) {
-    input.addEventListener("change", handleChange);
-  }
+  container.addEventListener("change", handleChange);
 
   syncFromViewer();
 
@@ -72,9 +107,7 @@ export function setupLayerControls({ viewer, container } = {}) {
   viewer.onLayerVisibilityChange = handler;
 
   return () => {
-    for (const input of checkboxes) {
-      input.removeEventListener("change", handleChange);
-    }
+    container.removeEventListener("change", handleChange);
     if (viewer.onLayerVisibilityChange === handler) {
       viewer.onLayerVisibilityChange = previousHandler ?? null;
     }

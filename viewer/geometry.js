@@ -15,12 +15,13 @@ export function calculateScale(width, height) {
 export function estimateSheathingTopZ(panels, wallThickness, wallSide) {
   const wallDir = wallSide >= 0 ? 1 : -1;
   const epsilon = 0.6;
+  const byLayer = Object.create(null);
   const defaults = {
     positive: wallDir * (wallThickness / 2 + epsilon),
     negative: -wallDir * (wallThickness / 2 + epsilon)
   };
   if (!Array.isArray(panels) || panels.length === 0) {
-    return defaults;
+    return { ...defaults, byLayer };
   }
   let positiveExtremum = null;
   let negativeExtremum = null;
@@ -43,10 +44,27 @@ export function estimateSheathingTopZ(panels, wallThickness, wallSide) {
     } else {
       negativeExtremum = negativeExtremum === null ? top : Math.min(negativeExtremum, top);
     }
+
+    const layerReference = resolveLayerReference({
+      layer: panel?.layer,
+      layerCommand: panel?.layerCommand,
+      layerIndex: panel?.layerIndex
+    });
+    const layerKey = layerReference.key ?? layerReference.base;
+    if (!layerKey) {
+      continue;
+    }
+    const existingTop = byLayer[layerKey];
+    if (faceDir >= 0) {
+      byLayer[layerKey] = Number.isFinite(existingTop) ? Math.max(existingTop, top) : top;
+    } else {
+      byLayer[layerKey] = Number.isFinite(existingTop) ? Math.min(existingTop, top) : top;
+    }
   }
   return {
     positive: positiveExtremum ?? defaults.positive,
-    negative: negativeExtremum ?? defaults.negative
+    negative: negativeExtremum ?? defaults.negative,
+    byLayer
   };
 }
 
@@ -123,8 +141,15 @@ export function createSheathingMesh(panel, context) {
   mesh.userData.kind = "sheathing";
   mesh.userData.panel = panel;
   mesh.userData.originalMaterial = materials.sheathing;
-  const panelLayer = typeof panel?.layer === "string" ? panel.layer : panel.faceDirection >= 0 ? "pli" : "pla";
-  mesh.userData.layer = panelLayer;
+  const layerReference = resolveLayerReference({
+    layer: panel?.layer ?? (panel?.faceDirection >= 0 ? "pli" : "pla"),
+    layerCommand: panel?.layerCommand,
+    layerIndex: panel?.layerIndex
+  });
+  mesh.userData.layer = layerReference.key;
+  mesh.userData.layerBase = layerReference.base;
+  mesh.userData.layerIndex = layerReference.index;
+  mesh.userData.layerCommand = layerReference.command;
   mesh.userData.setHoverState = state => {
     mesh.material = state ? highlightMaterials.sheathing : materials.sheathing;
   };
@@ -141,14 +166,20 @@ export function createNailRowMesh(row, context) {
     wallThickness,
     wallSide,
     sheathingSurfaces,
-    layer: layerOverride
+    layer: layerOverride,
+    layerCommand: layerCommandOverride,
+    layerIndex: layerIndexOverride
   } = context;
   if (!materials?.nailRow || !highlightMaterials?.nailRow || !nailMarkerGeometry) {
     return null;
   }
 
-  const effectiveLayer = layerOverride ?? row?.layer ?? "pli";
-  const faceDir = resolveLayerFaceDirection(effectiveLayer, wallSide);
+  const layerReference = resolveLayerReference({
+    layer: layerOverride ?? row?.layer ?? "pli",
+    layerCommand: layerCommandOverride ?? row?.layerCommand ?? null,
+    layerIndex: layerIndexOverride ?? row?.layerIndex ?? null
+  });
+  const faceDir = resolveLayerFaceDirection(layerReference.base, wallSide);
 
   const start = convertPointToWorld(row.start, offsets, scale);
   const end = convertPointToWorld(row.end, offsets, scale);
@@ -168,7 +199,7 @@ export function createNailRowMesh(row, context) {
   nailCount = Math.min(maxNails, nailCount);
 
   const direction = end.clone().sub(start);
-  const centerZ = computeNailRowZ(wallThickness, faceDir, sheathingSurfaces) * scale;
+  const centerZ = computeNailRowZ(wallThickness, faceDir, sheathingSurfaces, layerReference) * scale;
 
   const diameterMm = Number.isFinite(row.gauge) && row.gauge > 0 ? row.gauge : 12;
   const headSizeMm = Math.max(diameterMm * 1.4, 8);
@@ -212,7 +243,10 @@ export function createNailRowMesh(row, context) {
   instanced.userData.length = length / scale;
   instanced.userData.nails = nailCount;
   instanced.userData.spacing = rawSpacing;
-  instanced.userData.layer = effectiveLayer;
+  instanced.userData.layer = layerReference.key;
+  instanced.userData.layerBase = layerReference.base;
+  instanced.userData.layerIndex = layerReference.index;
+  instanced.userData.layerCommand = layerReference.command;
   instanced.userData.setHoverState = state => {
     instanced.material = state ? highlightMaterials.nailRow : materials.nailRow;
   };
@@ -348,7 +382,9 @@ export function createPafMeshes(routing, context) {
     wallThickness,
     wallSide,
     sheathingSurfaces,
-    layer: layerOverride
+    layer: layerOverride,
+    layerCommand: layerCommandOverride,
+    layerIndex: layerIndexOverride
   } = context;
   if (!materials?.pafRouting || !highlightMaterials?.pafRouting) {
     return [];
@@ -356,9 +392,25 @@ export function createPafMeshes(routing, context) {
   if (!routing?.segments) {
     return [];
   }
+  const hasLayerHint =
+    typeof layerOverride === "string" ||
+    typeof layerCommandOverride === "string" ||
+    Number.isFinite(layerIndexOverride) ||
+    typeof routing?.layer === "string" ||
+    typeof routing?.layerCommand === "string" ||
+    Number.isFinite(routing?.layerIndex);
+
+  const layerReference = hasLayerHint
+    ? resolveLayerReference({
+      layer: layerOverride ?? routing?.layer ?? null,
+      layerCommand: layerCommandOverride ?? routing?.layerCommand ?? null,
+      layerIndex: layerIndexOverride ?? routing?.layerIndex ?? null
+    })
+    : null;
+
   let routingFaceDir = inferRoutingFaceDirection(routing, wallSide);
-  if (layerOverride) {
-    routingFaceDir = resolveLayerFaceDirection(layerOverride, wallSide);
+  if (layerReference?.base) {
+    routingFaceDir = resolveLayerFaceDirection(layerReference.base, wallSide);
   }
   const meshes = [];
   for (const segment of routing.segments) {
@@ -371,7 +423,7 @@ export function createPafMeshes(routing, context) {
       wallSide,
       sheathingSurfaces,
       routingFaceDir,
-      layer: layerOverride
+      layerReference
     });
     if (mesh) {
       meshes.push(mesh);
@@ -588,9 +640,9 @@ function computeMemberCenterZ(element, wallThickness, wallSide, depthMm) {
   return interiorFace - clampedOffset - depthMm / 2;
 }
 
-function computeNailRowZ(wallThickness, faceDir, sheathingSurfaces) {
+function computeNailRowZ(wallThickness, faceDir, sheathingSurfaces, layerReference = null) {
   const epsilon = 1.2;
-  let surfaceZ = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness);
+  let surfaceZ = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness, layerReference);
   if (!Number.isFinite(surfaceZ)) {
     const halfWall = wallThickness / 2;
     const dir = faceDir >= 0 ? 1 : -1;
@@ -607,12 +659,84 @@ function resolvePanelFaceDirection(panel, wallSide) {
   return wallDir * panelDir;
 }
 
+function normalizeLayerToken(raw) {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized || null;
+}
+
+function parseLayerToken(raw) {
+  const normalized = normalizeLayerToken(raw);
+  if (!normalized) {
+    return null;
+  }
+  const match = normalized.match(/^(pli|pla)(\d+)?$/);
+  if (!match) {
+    return null;
+  }
+  const base = match[1];
+  const index = match[2] != null ? Number.parseInt(match[2], 10) : null;
+  const hasIndex = Number.isFinite(index);
+  return {
+    base,
+    index: hasIndex ? index : null,
+    key: hasIndex ? `${base}${index}` : base,
+    command: hasIndex ? `${base.toUpperCase()}${index}` : base.toUpperCase()
+  };
+}
+
+function resolveLayerReference(input = null) {
+  const ref = input && typeof input === "object" ? input : { layer: input };
+
+  const fromCommand = parseLayerToken(ref.layerCommand) ?? parseLayerToken(ref.command);
+  const fromLayer = parseLayerToken(ref.layer) ?? parseLayerToken(ref.key) ?? parseLayerToken(ref.base);
+  const rawIndexHint = Number.isFinite(ref.layerIndex) ? ref.layerIndex : ref.index;
+  const indexHintRaw = Number.isFinite(rawIndexHint) ? Math.trunc(rawIndexHint) : null;
+  const indexHint = Number.isFinite(indexHintRaw) && indexHintRaw >= 0 ? indexHintRaw : null;
+
+  const baseReference = fromCommand ?? fromLayer ?? parseLayerToken("pli");
+  if (!baseReference) {
+    return {
+      base: "pli",
+      index: null,
+      key: "pli",
+      command: "PLI"
+    };
+  }
+
+  const resolvedIndex = baseReference.index ?? indexHint;
+  if (Number.isFinite(resolvedIndex)) {
+    return {
+      base: baseReference.base,
+      index: resolvedIndex,
+      key: `${baseReference.base}${resolvedIndex}`,
+      command: `${baseReference.base.toUpperCase()}${resolvedIndex}`
+    };
+  }
+
+  return {
+    base: baseReference.base,
+    index: null,
+    key: baseReference.base,
+    command: baseReference.base.toUpperCase()
+  };
+}
+
 function resolveLayerFaceDirection(layer, wallSide) {
   const wallDir = wallSide >= 0 ? 1 : -1;
-  if (typeof layer !== "string") {
+  const normalized = normalizeLayerToken(layer);
+  if (!normalized) {
     return wallDir;
   }
-  return layer.toLowerCase() === "pla" ? -wallDir : wallDir;
+  if (normalized.startsWith("pla")) {
+    return -wallDir;
+  }
+  if (normalized.startsWith("pli")) {
+    return wallDir;
+  }
+  return wallDir;
 }
 
 function inferLayerFromDirection(faceDir, wallSide) {
@@ -624,7 +748,18 @@ function inferLayerFromDirection(faceDir, wallSide) {
   return "pli";
 }
 
-function resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness) {
+function resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness, layerReference = null) {
+  const hasLayerReference =
+    layerReference !== null &&
+    layerReference !== undefined &&
+    (typeof layerReference !== "object" || Object.keys(layerReference).length > 0);
+  if (hasLayerReference) {
+    const resolvedReference = resolveLayerReference(layerReference);
+    const layerKey = resolvedReference.key ?? null;
+    if (layerKey && sheathingSurfaces?.byLayer && Number.isFinite(sheathingSurfaces.byLayer[layerKey])) {
+      return sheathingSurfaces.byLayer[layerKey];
+    }
+  }
   if (faceDir >= 0) {
     const positive = sheathingSurfaces?.positive;
     return Number.isFinite(positive) ? positive : faceDir * (wallThickness / 2);
@@ -1104,7 +1239,7 @@ function createPafSegmentMesh(segment, routing, context) {
     wallSide,
     sheathingSurfaces,
     routingFaceDir,
-    layer
+    layerReference
   } = context;
   if (segment?.kind === "polygon") {
     return createPafPolygonMesh(segment, routing, {
@@ -1116,11 +1251,21 @@ function createPafSegmentMesh(segment, routing, context) {
       wallSide,
       sheathingSurfaces,
       routingFaceDir,
-      layer
+      layerReference
     });
   }
   if (segment?.kind === "polyline") {
-    return null;
+    return createPafPolylineMesh(segment, routing, {
+      materials,
+      highlightMaterials,
+      scale,
+      offsets,
+      wallThickness,
+      wallSide,
+      sheathingSurfaces,
+      routingFaceDir,
+      layerReference
+    });
   }
 
   const basePoint = segment?.position ?? segment?.start;
@@ -1131,7 +1276,9 @@ function createPafSegmentMesh(segment, routing, context) {
   const baseFaceDir = Number.isFinite(routingFaceDir)
     ? routingFaceDir
     : determinePafFaceDirection(routing.face, wallSide);
-  const faceDir = layer ? resolveLayerFaceDirection(layer, wallSide) : baseFaceDir;
+  const faceDir = layerReference?.base
+    ? resolveLayerFaceDirection(layerReference.base, wallSide)
+    : baseFaceDir;
   const radiusMm = (() => {
     if (Number.isFinite(segment?.radius)) {
       return Math.max(segment.radius, 0.5);
@@ -1143,7 +1290,7 @@ function createPafSegmentMesh(segment, routing, context) {
   })();
   const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
 
-  const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness);
+  const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness, layerReference);
   const tinyLift = 0.05;
   const topZMm = surfaceZMm + faceDir * tinyLift;
   const centerZMm = topZMm - faceDir * depthMm / 2;
@@ -1183,8 +1330,11 @@ function createPafSegmentMesh(segment, routing, context) {
     };
   }
 
-  const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
+  const resolvedLayer = layerReference?.key ?? inferLayerFromDirection(faceDir, wallSide);
   mesh.userData.layer = resolvedLayer;
+  mesh.userData.layerBase = layerReference?.base ?? inferLayerFromDirection(faceDir, wallSide);
+  mesh.userData.layerIndex = layerReference?.index ?? null;
+  mesh.userData.layerCommand = layerReference?.command ?? null;
   mesh.userData.setHoverState = state => {
     mesh.material = state ? highlightMaterials.pafRouting : materials.pafRouting;
   };
@@ -1311,6 +1461,98 @@ function createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, zP
   return geometry;
 }
 
+function createPafPolylineMesh(segment, routing, context) {
+  const {
+    materials,
+    highlightMaterials,
+    scale,
+    offsets,
+    wallThickness,
+    wallSide,
+    sheathingSurfaces,
+    routingFaceDir,
+    layerReference
+  } = context;
+
+  const points = Array.isArray(segment?.points) ? segment.points : null;
+  if (!points || points.length < 2) {
+    return null;
+  }
+
+  const deduped = dedupeSequentialPoints(points);
+  if (deduped.length < 2) {
+    return null;
+  }
+
+  const pathSegments = Array.isArray(segment?.pathSegments) ? segment.pathSegments : null;
+  const worldPoints = deduped.map(point => convertPointToWorld(point, offsets, scale));
+  if (!worldPoints || worldPoints.length < 2) {
+    return null;
+  }
+
+  const baseFaceDir = Number.isFinite(routingFaceDir)
+    ? routingFaceDir
+    : determinePafFaceDirection(routing.face, wallSide);
+  const faceDir = layerReference?.base
+    ? resolveLayerFaceDirection(layerReference.base, wallSide)
+    : baseFaceDir;
+  const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness, layerReference);
+  const tinyLift = 0.5;
+  const lineZMm = surfaceZMm + faceDir * tinyLift;
+  const lineZ = lineZMm * scale;
+
+  const controlCode = extractControlCode(segment);
+  const controlInfo = parseControlCode(controlCode);
+  const adjustment = resolveFootprintAdjustment(controlInfo, DEFAULT_TOOL_RADIUS, { points: deduped });
+
+  const edgeMode = controlInfo?.edgeMode?.code ?? 0;
+  const isUndercut = edgeMode === 2;
+  const baseMaterial = isUndercut ? materials.pafRoutingLineDashed : materials.pafRoutingLine;
+  const highlightMaterial = isUndercut ? highlightMaterials.pafRoutingLineDashed : highlightMaterials.pafRoutingLine;
+
+  const geometry = createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, lineZ, false);
+  const positions = geometry?.attributes?.position;
+  if (!positions || positions.count < 2) {
+    return null;
+  }
+
+  const line = new THREE.LineSegments(geometry, baseMaterial);
+  if (isUndercut) {
+    line.computeLineDistances();
+  }
+  line.renderOrder = 2;
+
+  const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
+  const resolvedLayer = layerReference?.key ?? inferLayerFromDirection(faceDir, wallSide);
+  const resolvedLayerBase = layerReference?.base ?? inferLayerFromDirection(faceDir, wallSide);
+
+  const group = new THREE.Group();
+  group.add(line);
+  group.userData = {
+    kind: "paf",
+    routing,
+    segment,
+    editorId: routing?.__editorId ?? null,
+    originalMaterial: materials.pafRouting,
+    originalLineMaterial: baseMaterial,
+    controlCode,
+    controlInfo,
+    footprintAdjustment: adjustment,
+    assumedToolRadius: adjustment?.applied ? DEFAULT_TOOL_RADIUS : null,
+    cutoutFootprint: null,
+    layer: resolvedLayer,
+    layerBase: resolvedLayerBase,
+    layerIndex: layerReference?.index ?? null,
+    layerCommand: layerReference?.command ?? null,
+    depth: depthMm,
+    setHoverState: state => {
+      line.material = state ? highlightMaterial : baseMaterial;
+    }
+  };
+
+  return group;
+}
+
 function createPafPolygonMesh(segment, routing, context) {
   const {
     materials,
@@ -1321,7 +1563,7 @@ function createPafPolygonMesh(segment, routing, context) {
     wallSide,
     sheathingSurfaces,
     routingFaceDir,
-    layer
+    layerReference
   } = context;
   const points = Array.isArray(segment?.points) ? segment.points : null;
   if (!points || points.length < 3) {
@@ -1396,8 +1638,10 @@ function createPafPolygonMesh(segment, routing, context) {
   const baseFaceDir = Number.isFinite(routingFaceDir)
     ? routingFaceDir
     : determinePafFaceDirection(routing.face, wallSide);
-  const faceDir = layer ? resolveLayerFaceDirection(layer, wallSide) : baseFaceDir;
-  const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness);
+  const faceDir = layerReference?.base
+    ? resolveLayerFaceDirection(layerReference.base, wallSide)
+    : baseFaceDir;
+  const surfaceZMm = resolvePafSurfaceZ(faceDir, sheathingSurfaces, wallThickness, layerReference);
   const tinyLift = 0.5; // Increased lift to make lines more visible above surface
   const lineZMm = surfaceZMm + faceDir * tinyLift;
   const lineZ = lineZMm * scale;
@@ -1507,7 +1751,8 @@ function createPafPolygonMesh(segment, routing, context) {
   const footprint = computeCutoutFootprint(segment.points, controlInfo, DEFAULT_TOOL_RADIUS, {
     adjustment
   });
-  const resolvedLayer = layer ?? inferLayerFromDirection(faceDir, wallSide);
+  const resolvedLayer = layerReference?.key ?? inferLayerFromDirection(faceDir, wallSide);
+  const resolvedLayerBase = layerReference?.base ?? inferLayerFromDirection(faceDir, wallSide);
 
   group.userData = {
     kind: "paf",
@@ -1522,6 +1767,9 @@ function createPafPolygonMesh(segment, routing, context) {
     assumedToolRadius: adjustment?.applied ? DEFAULT_TOOL_RADIUS : null,
     cutoutFootprint: footprint ?? null,
     layer: resolvedLayer,
+    layerBase: resolvedLayerBase,
+    layerIndex: layerReference?.index ?? null,
+    layerCommand: layerReference?.command ?? null,
     depth: depthMm,
     setHoverState: state => {
       line.material = state ? highlightMaterial : baseMaterial;
