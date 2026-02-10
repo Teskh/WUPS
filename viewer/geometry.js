@@ -1461,6 +1461,141 @@ function createPafPathLineGeometry(worldPoints, pathSegments, offsets, scale, zP
   return geometry;
 }
 
+function resolveOffsetPathPoints(points, offsetDistance, isClosedPath) {
+  if (!Array.isArray(points) || points.length < 2 || !Number.isFinite(offsetDistance)) {
+    return null;
+  }
+
+  if (isClosedPath) {
+    if (points.length < 3) {
+      return null;
+    }
+    const offsetPoints = offsetPolygonPoints(points, offsetDistance, { closed: true });
+    return Array.isArray(offsetPoints) ? dedupeSequentialPoints(offsetPoints) : null;
+  }
+
+  if (points.length === 2) {
+    const [start, end] = points;
+    if (!isFinitePoint(start) || !isFinitePoint(end)) {
+      return null;
+    }
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) {
+      return null;
+    }
+    const nx = -dy / len;
+    const ny = dx / len;
+    return [
+      { x: start.x + nx * offsetDistance, y: start.y + ny * offsetDistance },
+      { x: end.x + nx * offsetDistance, y: end.y + ny * offsetDistance }
+    ];
+  }
+
+  const offsetPoints = offsetPolygonPoints(points, offsetDistance, { closed: false });
+  return Array.isArray(offsetPoints) ? dedupeSequentialPoints(offsetPoints) : null;
+}
+
+function createCenteredEnvelopeLine(points, options) {
+  const { isClosedPath, offsets, scale, lineZ, material } = options;
+  if (!material || !Array.isArray(points)) {
+    return null;
+  }
+
+  const minPoints = isClosedPath ? 3 : 2;
+  if (points.length < minPoints) {
+    return null;
+  }
+  const worldPoints = points.map(point => convertPointToWorld(point, offsets, scale));
+  if (!Array.isArray(worldPoints) || worldPoints.length < minPoints) {
+    return null;
+  }
+
+  const geometry = createPafPathLineGeometry(worldPoints, null, offsets, scale, lineZ, isClosedPath);
+  const positions = geometry?.attributes?.position;
+  if (!positions || positions.count < 2) {
+    return null;
+  }
+
+  const line = new THREE.LineSegments(geometry, material);
+  line.renderOrder = 3;
+  line.userData = { overlayRole: "centeredEnvelope" };
+  return line;
+}
+
+function createCenteredEnvelopeCap(point, options) {
+  const { offsets, scale, lineZ, material, radiusMm } = options;
+  if (!material || !isFinitePoint(point) || !Number.isFinite(radiusMm) || radiusMm <= 0) {
+    return null;
+  }
+
+  const center = convertPointToWorld(point, offsets, scale);
+  const radiusWorld = radiusMm * scale;
+  if (radiusWorld < 1e-6) {
+    return null;
+  }
+
+  const points3D = [];
+  const segments = 32;
+  for (let i = 0; i < segments; i += 1) {
+    const a1 = (i / segments) * Math.PI * 2;
+    const a2 = ((i + 1) / segments) * Math.PI * 2;
+    points3D.push(
+      new THREE.Vector3(center.x + Math.cos(a1) * radiusWorld, center.y + Math.sin(a1) * radiusWorld, lineZ),
+      new THREE.Vector3(center.x + Math.cos(a2) * radiusWorld, center.y + Math.sin(a2) * radiusWorld, lineZ)
+    );
+  }
+
+  if (points3D.length < 2) {
+    return null;
+  }
+  const geometry = new THREE.BufferGeometry().setFromPoints(points3D);
+  const capLine = new THREE.LineSegments(geometry, material);
+  capLine.renderOrder = 3;
+  capLine.userData = { overlayRole: "centeredEnvelopeCap" };
+  return capLine;
+}
+
+function buildCenteredPathEnvelopeArtifacts(points, options) {
+  const {
+    isClosedPath = false,
+    toolRadiusMm = DEFAULT_TOOL_RADIUS,
+    material
+  } = options ?? {};
+  if (!material || !Array.isArray(points) || points.length < 2) {
+    return [];
+  }
+
+  const artifacts = [];
+  const outerPoints = resolveOffsetPathPoints(points, toolRadiusMm, isClosedPath);
+  const innerPoints = resolveOffsetPathPoints(points, -toolRadiusMm, isClosedPath);
+
+  const outerLine = createCenteredEnvelopeLine(outerPoints, { ...options, isClosedPath, material });
+  if (outerLine) {
+    artifacts.push(outerLine);
+  }
+  const innerLine = createCenteredEnvelopeLine(innerPoints, { ...options, isClosedPath, material });
+  if (innerLine) {
+    artifacts.push(innerLine);
+  }
+
+  if (!isClosedPath) {
+    const start = points[0];
+    const end = points[points.length - 1];
+    const startCap = createCenteredEnvelopeCap(start, { ...options, radiusMm: toolRadiusMm, material });
+    if (startCap) {
+      artifacts.push(startCap);
+    }
+    const endCap = createCenteredEnvelopeCap(end, { ...options, radiusMm: toolRadiusMm, material });
+    if (endCap) {
+      artifacts.push(endCap);
+    }
+  }
+
+  return artifacts;
+}
+
 function createPafPolylineMesh(segment, routing, context) {
   const {
     materials,
@@ -1521,6 +1656,22 @@ function createPafPolylineMesh(segment, routing, context) {
     line.computeLineDistances();
   }
   line.renderOrder = 2;
+  const overlayArtifacts = [];
+  if (adjustment?.mode === "radius" && adjustment?.applied && materials.pafOvercuttingLine) {
+    const centeredArtifacts = buildCenteredPathEnvelopeArtifacts(deduped, {
+      isClosedPath: false,
+      toolRadiusMm: DEFAULT_TOOL_RADIUS,
+      offsets,
+      scale,
+      lineZ,
+      material: materials.pafOvercuttingLine
+    });
+    centeredArtifacts.forEach(artifact => {
+      if (artifact) {
+        overlayArtifacts.push(artifact);
+      }
+    });
+  }
 
   const depthMm = resolvePafSegmentDepthMm(segment, wallThickness);
   const resolvedLayer = layerReference?.key ?? inferLayerFromDirection(faceDir, wallSide);
@@ -1528,6 +1679,9 @@ function createPafPolylineMesh(segment, routing, context) {
 
   const group = new THREE.Group();
   group.add(line);
+  overlayArtifacts.forEach(artifact => {
+    group.add(artifact);
+  });
   group.userData = {
     kind: "paf",
     routing,
@@ -1547,6 +1701,19 @@ function createPafPolylineMesh(segment, routing, context) {
     depth: depthMm,
     setHoverState: state => {
       line.material = state ? highlightMaterial : baseMaterial;
+      if (materials.pafOvercuttingLine && highlightMaterials.pafOvercuttingLine) {
+        for (const artifact of overlayArtifacts) {
+          if (!artifact?.userData) {
+            continue;
+          }
+          if (
+            artifact.userData.overlayRole === "centeredEnvelope" ||
+            artifact.userData.overlayRole === "centeredEnvelopeCap"
+          ) {
+            artifact.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
+          }
+        }
+      }
     }
   };
 
@@ -1705,7 +1872,21 @@ function createPafPolygonMesh(segment, routing, context) {
   }
 
   let expandedLine = null;
-  if (adjustment?.applied && adjustment.expansion > 0) {
+  if (adjustment?.mode === "radius" && adjustment?.applied && materials.pafOvercuttingLine) {
+    const centeredArtifacts = buildCenteredPathEnvelopeArtifacts(deduped, {
+      isClosedPath,
+      toolRadiusMm: DEFAULT_TOOL_RADIUS,
+      offsets,
+      scale,
+      lineZ,
+      material: materials.pafOvercuttingLine
+    });
+    centeredArtifacts.forEach(artifact => {
+      if (artifact) {
+        overlayArtifacts.push(artifact);
+      }
+    });
+  } else if (adjustment?.applied && adjustment.expansion > 0) {
     const expansionMm = adjustment.expansion / 2; // expansion per side
     const offsetPoints = offsetPolygonPoints(deduped, expansionMm, { closed: isClosedPath });
     const cleanedOffsetPoints = Array.isArray(offsetPoints) ? dedupeSequentialPoints(offsetPoints) : null;
@@ -1790,6 +1971,13 @@ function createPafPolygonMesh(segment, routing, context) {
         } else if (artifact.userData.cornerArtifact === "relief") {
           if (materials.pafCornerReliefLine && highlightMaterials.pafCornerReliefLine) {
             artifact.material = state ? highlightMaterials.pafCornerReliefLine : materials.pafCornerReliefLine;
+          }
+        } else if (
+          artifact.userData.overlayRole === "centeredEnvelope" ||
+          artifact.userData.overlayRole === "centeredEnvelopeCap"
+        ) {
+          if (materials.pafOvercuttingLine && highlightMaterials.pafOvercuttingLine) {
+            artifact.material = state ? highlightMaterials.pafOvercuttingLine : materials.pafOvercuttingLine;
           }
         }
       }
