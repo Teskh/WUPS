@@ -451,7 +451,7 @@ function displayResults() {
 }
 
 /**
- * Download all modified files as a zip (or individually)
+ * Download all modified files as a single zip file
  */
 function handleDownloadAll() {
   const modifiedFiles = processedResults.filter(r => r.success && r.outletsModernized > 0);
@@ -461,10 +461,23 @@ function handleDownloadAll() {
     return;
   }
 
-  // Download each file individually
-  modifiedFiles.forEach(result => {
-    downloadFile(result.modifiedContent, result.filename);
-  });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+
+  try {
+    const zipBlob = createZipBlob(
+      modifiedFiles.map(result => ({
+        filename: result.filename,
+        content: result.modifiedContent
+      }))
+    );
+    downloadBlob(zipBlob, `archivos-modernizados-${timestamp}.zip`);
+  } catch (error) {
+    console.error("No se pudo generar el ZIP, se descargará archivo por archivo", error);
+    alert("No se pudo generar el ZIP; se descargarán los archivos individualmente.");
+    modifiedFiles.forEach(result => {
+      downloadFile(result.modifiedContent, result.filename);
+    });
+  }
 }
 
 /**
@@ -533,6 +546,13 @@ function generateReport() {
  */
 function downloadFile(content, filename) {
   const blob = new Blob([content], { type: "text/plain" });
+  downloadBlob(blob, filename);
+}
+
+/**
+ * Download an arbitrary blob
+ */
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -542,6 +562,201 @@ function downloadFile(content, filename) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Create a ZIP blob with uncompressed entries.
+ * This avoids multi-download browser warnings by producing one output file.
+ */
+function createZipBlob(files) {
+  const encoder = new TextEncoder();
+  const entries = files.map(file => {
+    const filename = sanitizeZipFilename(file.filename);
+    const content = typeof file.content === "string" ? file.content : String(file.content ?? "");
+    return {
+      filenameBytes: encoder.encode(filename),
+      dataBytes: encoder.encode(content)
+    };
+  });
+
+  const now = new Date();
+  const dos = toDosDateTime(now);
+
+  const localParts = [];
+  const centralParts = [];
+  let localOffset = 0;
+
+  entries.forEach(entry => {
+    const crc = crc32(entry.dataBytes);
+    const size = entry.dataBytes.length;
+    const nameLength = entry.filenameBytes.length;
+
+    const localHeader = createLocalHeader({
+      crc32Value: crc,
+      compressedSize: size,
+      uncompressedSize: size,
+      fileNameLength: nameLength,
+      modTime: dos.time,
+      modDate: dos.date
+    });
+
+    localParts.push(localHeader, entry.filenameBytes, entry.dataBytes);
+
+    const centralHeader = createCentralHeader({
+      crc32Value: crc,
+      compressedSize: size,
+      uncompressedSize: size,
+      fileNameLength: nameLength,
+      modTime: dos.time,
+      modDate: dos.date,
+      relativeOffset: localOffset
+    });
+    centralParts.push(centralHeader, entry.filenameBytes);
+
+    localOffset += localHeader.length + nameLength + size;
+  });
+
+  const centralDirectory = concatUint8Arrays(centralParts);
+  const localData = concatUint8Arrays(localParts);
+  const endRecord = createEndOfCentralDirectory({
+    totalEntries: entries.length,
+    centralDirectorySize: centralDirectory.length,
+    centralDirectoryOffset: localData.length
+  });
+
+  const zipBytes = concatUint8Arrays([localData, centralDirectory, endRecord]);
+  return new Blob([zipBytes], { type: "application/zip" });
+}
+
+function sanitizeZipFilename(filename) {
+  const safeName = (filename || "archivo.wup").replace(/[\\/]/g, "_");
+  return safeName.trim() || "archivo.wup";
+}
+
+function toDosDateTime(date) {
+  const year = Math.max(1980, date.getFullYear());
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const seconds = Math.floor(date.getSeconds() / 2);
+
+  const dosTime = (hours << 11) | (minutes << 5) | seconds;
+  const dosDate = ((year - 1980) << 9) | (month << 5) | day;
+
+  return { time: dosTime, date: dosDate };
+}
+
+function createLocalHeader({
+  crc32Value,
+  compressedSize,
+  uncompressedSize,
+  fileNameLength,
+  modTime,
+  modDate
+}) {
+  const bytes = new Uint8Array(30);
+  const view = new DataView(bytes.buffer);
+
+  view.setUint32(0, 0x04034b50, true); // Local file header signature
+  view.setUint16(4, 20, true); // Version needed to extract
+  view.setUint16(6, 0x0800, true); // General purpose bit flag (UTF-8 filename)
+  view.setUint16(8, 0, true); // Compression method (store)
+  view.setUint16(10, modTime, true);
+  view.setUint16(12, modDate, true);
+  view.setUint32(14, crc32Value >>> 0, true);
+  view.setUint32(18, compressedSize, true);
+  view.setUint32(22, uncompressedSize, true);
+  view.setUint16(26, fileNameLength, true);
+  view.setUint16(28, 0, true); // Extra field length
+
+  return bytes;
+}
+
+function createCentralHeader({
+  crc32Value,
+  compressedSize,
+  uncompressedSize,
+  fileNameLength,
+  modTime,
+  modDate,
+  relativeOffset
+}) {
+  const bytes = new Uint8Array(46);
+  const view = new DataView(bytes.buffer);
+
+  view.setUint32(0, 0x02014b50, true); // Central directory signature
+  view.setUint16(4, 20, true); // Version made by
+  view.setUint16(6, 20, true); // Version needed to extract
+  view.setUint16(8, 0x0800, true); // General purpose bit flag (UTF-8 filename)
+  view.setUint16(10, 0, true); // Compression method (store)
+  view.setUint16(12, modTime, true);
+  view.setUint16(14, modDate, true);
+  view.setUint32(16, crc32Value >>> 0, true);
+  view.setUint32(20, compressedSize, true);
+  view.setUint32(24, uncompressedSize, true);
+  view.setUint16(28, fileNameLength, true);
+  view.setUint16(30, 0, true); // Extra field length
+  view.setUint16(32, 0, true); // File comment length
+  view.setUint16(34, 0, true); // Disk number start
+  view.setUint16(36, 0, true); // Internal file attributes
+  view.setUint32(38, 0, true); // External file attributes
+  view.setUint32(42, relativeOffset, true);
+
+  return bytes;
+}
+
+function createEndOfCentralDirectory({
+  totalEntries,
+  centralDirectorySize,
+  centralDirectoryOffset
+}) {
+  const bytes = new Uint8Array(22);
+  const view = new DataView(bytes.buffer);
+
+  view.setUint32(0, 0x06054b50, true); // End of central directory signature
+  view.setUint16(4, 0, true); // Number of this disk
+  view.setUint16(6, 0, true); // Number of the disk with start of central directory
+  view.setUint16(8, totalEntries, true);
+  view.setUint16(10, totalEntries, true);
+  view.setUint32(12, centralDirectorySize, true);
+  view.setUint32(16, centralDirectoryOffset, true);
+  view.setUint16(20, 0, true); // ZIP file comment length
+
+  return bytes;
+}
+
+function concatUint8Arrays(arrays) {
+  const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+
+  arrays.forEach(arr => {
+    result.set(arr, offset);
+    offset += arr.length;
+  });
+
+  return result;
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  bytes.forEach(byte => {
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ byte) & 0xff];
+  });
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let k = 0; k < 8; k += 1) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
 
 /**
  * Reset the application
