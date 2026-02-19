@@ -1557,19 +1557,144 @@ function createCenteredEnvelopeCap(point, options) {
   return capLine;
 }
 
+function createCenteredEnvelopeBridge(pointA, pointB, options) {
+  const { offsets, scale, lineZ, material } = options;
+  if (!material || !isFinitePoint(pointA) || !isFinitePoint(pointB)) {
+    return null;
+  }
+
+  const worldA = convertPointToWorld(pointA, offsets, scale);
+  const worldB = convertPointToWorld(pointB, offsets, scale);
+  if (!worldA || !worldB || worldA.distanceTo(worldB) < 1e-6) {
+    return null;
+  }
+
+  const geometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(worldA.x, worldA.y, lineZ),
+    new THREE.Vector3(worldB.x, worldB.y, lineZ)
+  ]);
+  const bridgeLine = new THREE.LineSegments(geometry, material);
+  bridgeLine.renderOrder = 3;
+  bridgeLine.userData = { overlayRole: "centeredEnvelopeCap" };
+  return bridgeLine;
+}
+
+function createCenteredEnvelopeSemicircleCap(centerPoint, tangent, options) {
+  const { offsets, scale, lineZ, material, radiusMm, bulgeSign = 1 } = options;
+  if (!material || !isFinitePoint(centerPoint) || !isFinitePoint(tangent) || !Number.isFinite(radiusMm) || radiusMm <= 0) {
+    return null;
+  }
+
+  const tangentLength = Math.hypot(tangent.x, tangent.y);
+  if (tangentLength < 1e-6) {
+    return null;
+  }
+
+  const tx = tangent.x / tangentLength;
+  const ty = tangent.y / tangentLength;
+  const nx = -ty;
+  const ny = tx;
+  const sign = bulgeSign >= 0 ? 1 : -1;
+  const points3D = [];
+  const segments = 24;
+
+  for (let i = 0; i < segments; i += 1) {
+    const a1 = (i / segments) * Math.PI;
+    const a2 = ((i + 1) / segments) * Math.PI;
+    const p1 = {
+      x: centerPoint.x + nx * Math.cos(a1) * radiusMm + tx * Math.sin(a1) * radiusMm * sign,
+      y: centerPoint.y + ny * Math.cos(a1) * radiusMm + ty * Math.sin(a1) * radiusMm * sign
+    };
+    const p2 = {
+      x: centerPoint.x + nx * Math.cos(a2) * radiusMm + tx * Math.sin(a2) * radiusMm * sign,
+      y: centerPoint.y + ny * Math.cos(a2) * radiusMm + ty * Math.sin(a2) * radiusMm * sign
+    };
+    const worldP1 = convertPointToWorld(p1, offsets, scale);
+    const worldP2 = convertPointToWorld(p2, offsets, scale);
+    if (!worldP1 || !worldP2) {
+      continue;
+    }
+    points3D.push(
+      new THREE.Vector3(worldP1.x, worldP1.y, lineZ),
+      new THREE.Vector3(worldP2.x, worldP2.y, lineZ)
+    );
+  }
+
+  if (points3D.length < 2) {
+    return null;
+  }
+
+  const geometry = new THREE.BufferGeometry().setFromPoints(points3D);
+  const capLine = new THREE.LineSegments(geometry, material);
+  capLine.renderOrder = 3;
+  capLine.userData = { overlayRole: "centeredEnvelopeCap" };
+  return capLine;
+}
+
+function resolveUndercutEnvelopePoints(points, trimDistanceMm) {
+  if (!Array.isArray(points) || points.length < 2 || !Number.isFinite(trimDistanceMm) || trimDistanceMm <= 0) {
+    return points;
+  }
+  const adjusted = points.map(point => ({ x: point.x, y: point.y }));
+  const lastIndex = adjusted.length - 1;
+  const start = adjusted[0];
+  const next = adjusted[1];
+  const prev = adjusted[lastIndex - 1];
+  const end = adjusted[lastIndex];
+  if (!isFinitePoint(start) || !isFinitePoint(next) || !isFinitePoint(prev) || !isFinitePoint(end)) {
+    return points;
+  }
+
+  const startDx = next.x - start.x;
+  const startDy = next.y - start.y;
+  const endDx = end.x - prev.x;
+  const endDy = end.y - prev.y;
+  const startLen = Math.hypot(startDx, startDy);
+  const endLen = Math.hypot(endDx, endDy);
+  if (startLen < 1e-6 || endLen < 1e-6) {
+    return points;
+  }
+
+  const startTrim = Math.min(trimDistanceMm, startLen * 0.45);
+  const endTrim = Math.min(trimDistanceMm, endLen * 0.45);
+  adjusted[0] = {
+    x: start.x + (startDx / startLen) * startTrim,
+    y: start.y + (startDy / startLen) * startTrim
+  };
+  adjusted[lastIndex] = {
+    x: end.x - (endDx / endLen) * endTrim,
+    y: end.y - (endDy / endLen) * endTrim
+  };
+
+  if (adjusted.length === 2) {
+    const remaining = Math.hypot(adjusted[1].x - adjusted[0].x, adjusted[1].y - adjusted[0].y);
+    if (remaining < 1e-6) {
+      return points;
+    }
+  }
+  return adjusted;
+}
+
 function buildCenteredPathEnvelopeArtifacts(points, options) {
   const {
     isClosedPath = false,
     toolRadiusMm = DEFAULT_TOOL_RADIUS,
+    edgeMode = 0,
     material
   } = options ?? {};
   if (!material || !Array.isArray(points) || points.length < 2) {
     return [];
   }
 
+  const openEdgeMode = Number.isFinite(edgeMode) ? Math.round(edgeMode) : 0;
+  const envelopePoints =
+    !isClosedPath && openEdgeMode === 2
+      ? resolveUndercutEnvelopePoints(points, toolRadiusMm)
+      : points;
+
   const artifacts = [];
-  const outerPoints = resolveOffsetPathPoints(points, toolRadiusMm, isClosedPath);
-  const innerPoints = resolveOffsetPathPoints(points, -toolRadiusMm, isClosedPath);
+  const outerPoints = resolveOffsetPathPoints(envelopePoints, toolRadiusMm, isClosedPath);
+  const innerPoints = resolveOffsetPathPoints(envelopePoints, -toolRadiusMm, isClosedPath);
 
   const outerLine = createCenteredEnvelopeLine(outerPoints, { ...options, isClosedPath, material });
   if (outerLine) {
@@ -1581,15 +1706,64 @@ function buildCenteredPathEnvelopeArtifacts(points, options) {
   }
 
   if (!isClosedPath) {
-    const start = points[0];
-    const end = points[points.length - 1];
-    const startCap = createCenteredEnvelopeCap(start, { ...options, radiusMm: toolRadiusMm, material });
-    if (startCap) {
-      artifacts.push(startCap);
-    }
-    const endCap = createCenteredEnvelopeCap(end, { ...options, radiusMm: toolRadiusMm, material });
-    if (endCap) {
-      artifacts.push(endCap);
+    if (openEdgeMode === 1) {
+      const start = envelopePoints[0];
+      const end = envelopePoints[envelopePoints.length - 1];
+      const startCap = createCenteredEnvelopeCap(start, { ...options, radiusMm: toolRadiusMm, material });
+      if (startCap) {
+        artifacts.push(startCap);
+      }
+      const endCap = createCenteredEnvelopeCap(end, { ...options, radiusMm: toolRadiusMm, material });
+      if (endCap) {
+        artifacts.push(endCap);
+      }
+    } else if (Array.isArray(outerPoints) && Array.isArray(innerPoints) && outerPoints.length > 0 && innerPoints.length > 0) {
+      const startPoint = envelopePoints[0];
+      const endPoint = envelopePoints[envelopePoints.length - 1];
+      const startNext = envelopePoints[1];
+      const endPrev = envelopePoints[envelopePoints.length - 2];
+      const startTangent =
+        isFinitePoint(startPoint) && isFinitePoint(startNext)
+          ? { x: startNext.x - startPoint.x, y: startNext.y - startPoint.y }
+          : null;
+      const endTangent =
+        isFinitePoint(endPoint) && isFinitePoint(endPrev)
+          ? { x: endPoint.x - endPrev.x, y: endPoint.y - endPrev.y }
+          : null;
+
+      const startCap = createCenteredEnvelopeSemicircleCap(startPoint, startTangent, {
+        ...options,
+        radiusMm: toolRadiusMm,
+        bulgeSign: -1,
+        material
+      });
+      if (startCap) {
+        artifacts.push(startCap);
+      } else {
+        const startBridge = createCenteredEnvelopeBridge(outerPoints[0], innerPoints[0], { ...options, material });
+        if (startBridge) {
+          artifacts.push(startBridge);
+        }
+      }
+
+      const endCap = createCenteredEnvelopeSemicircleCap(endPoint, endTangent, {
+        ...options,
+        radiusMm: toolRadiusMm,
+        bulgeSign: 1,
+        material
+      });
+      if (endCap) {
+        artifacts.push(endCap);
+      } else {
+        const endBridge = createCenteredEnvelopeBridge(
+          outerPoints[outerPoints.length - 1],
+          innerPoints[innerPoints.length - 1],
+          { ...options, material }
+        );
+        if (endBridge) {
+          artifacts.push(endBridge);
+        }
+      }
     }
   }
 
@@ -1661,6 +1835,7 @@ function createPafPolylineMesh(segment, routing, context) {
     const centeredArtifacts = buildCenteredPathEnvelopeArtifacts(deduped, {
       isClosedPath: false,
       toolRadiusMm: DEFAULT_TOOL_RADIUS,
+      edgeMode,
       offsets,
       scale,
       lineZ,
@@ -1876,6 +2051,7 @@ function createPafPolygonMesh(segment, routing, context) {
     const centeredArtifacts = buildCenteredPathEnvelopeArtifacts(deduped, {
       isClosedPath,
       toolRadiusMm: DEFAULT_TOOL_RADIUS,
+      edgeMode,
       offsets,
       scale,
       lineZ,
