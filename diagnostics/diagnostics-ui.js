@@ -8,12 +8,16 @@ import {
   runDiagnostic,
   runAllDiagnostics,
   getAvailableDiagnostics,
-  saveDiagnosticResults
+  saveDiagnosticResults,
+  formatAllDiagnosticsReport
 } from "./diagnostic-runner.js";
 import { createModernOutletRouting } from "./outlet-modernizer.js";
 import { parseWup, normalizeModel } from "../wup-parser.js";
 
 let currentModel = null;
+let activeModelId = null;
+let loadedEntries = [];
+let lastRunPayload = null;
 let diagnosticsPanel = null;
 
 /**
@@ -24,6 +28,16 @@ export function initDiagnosticsUI() {
   if (typeof document !== "undefined") {
     document.addEventListener("wup:model", event => {
       currentModel = event.detail.model;
+      activeModelId = event.detail.id ?? activeModelId;
+      lastRunPayload = null;
+      updateDiagnosticsState();
+    });
+
+    document.addEventListener("wup:collection", event => {
+      const entries = Array.isArray(event.detail?.entries) ? event.detail.entries : [];
+      loadedEntries = entries;
+      activeModelId = event.detail?.activeId ?? activeModelId;
+      lastRunPayload = null;
       updateDiagnosticsState();
     });
 
@@ -53,6 +67,10 @@ function createDiagnosticsPanel() {
     </div>
 
     <div class="diagnostics-actions">
+      <div class="diagnostics-scope" role="group" aria-label="Diagnostics scope">
+        <label><input type="radio" name="diagnosticsScope" value="current" checked> Current WUP</label>
+        <label><input type="radio" name="diagnosticsScope" value="all"> All loaded WUPs</label>
+      </div>
       <button id="runAllDiagnostics" type="button" disabled>Run All Diagnostics</button>
       <button id="saveDiagnostics" type="button" disabled>Save Report</button>
     </div>
@@ -86,9 +104,14 @@ function createDiagnosticsPanel() {
   document.getElementById("runAllDiagnostics").addEventListener("click", handleRunAll);
   document.getElementById("runSelectedDiagnostic").addEventListener("click", handleRunSelected);
   document.getElementById("saveDiagnostics").addEventListener("click", handleSave);
+  document.querySelectorAll("input[name='diagnosticsScope']").forEach(input => {
+    input.addEventListener("change", updateDiagnosticsState);
+  });
 
   // Add button to main UI
   addDiagnosticsButton();
+
+  hydrateCollectionFromSession();
 }
 
 /**
@@ -113,17 +136,24 @@ function addDiagnosticsButton() {
  * Update UI state based on whether a model is loaded
  */
 function updateDiagnosticsState() {
-  const hasModel = currentModel !== null;
+  const hasCurrentModel = currentModel !== null;
+  const hasAnyLoaded = getEntriesWithModels().length > 0;
+  const scope = getSelectedScope();
+  const hasScopeData = scope === "all" ? hasAnyLoaded : hasCurrentModel;
 
   const openButton = document.getElementById("openDiagnostics");
   const runAllButton = document.getElementById("runAllDiagnostics");
   const runSelectedButton = document.getElementById("runSelectedDiagnostic");
   const selector = document.getElementById("diagnosticSelector");
+  const saveButton = document.getElementById("saveDiagnostics");
 
-  if (openButton) openButton.disabled = !hasModel;
-  if (runAllButton) runAllButton.disabled = !hasModel;
-  if (runSelectedButton) runSelectedButton.disabled = !hasModel;
-  if (selector) selector.disabled = !hasModel;
+  if (openButton) openButton.disabled = !hasCurrentModel;
+  if (runAllButton) runAllButton.disabled = !hasScopeData;
+  if (runSelectedButton) runSelectedButton.disabled = !hasScopeData;
+  if (selector) selector.disabled = !hasScopeData;
+  if (saveButton && !lastRunPayload) {
+    saveButton.disabled = true;
+  }
 }
 
 /**
@@ -148,6 +178,19 @@ function hideDiagnostics() {
  * Handle running all diagnostics
  */
 function handleRunAll() {
+  const scope = getSelectedScope();
+
+  if (scope === "all") {
+    const batch = runAllLoadedWups();
+    if (!batch) {
+      alert("No loaded WUP models are available for diagnostics.");
+      return;
+    }
+    displayBatchResults(batch);
+    setLastRunPayload(batch);
+    return;
+  }
+
   if (!currentModel) {
     alert("No model loaded. Please load a WUP file first.");
     return;
@@ -155,24 +198,18 @@ function handleRunAll() {
 
   const results = runAllDiagnostics(currentModel);
   displayAllResults(results);
-
-  // Enable save button
-  const saveButton = document.getElementById("saveDiagnostics");
-  if (saveButton) {
-    saveButton.disabled = false;
-    saveButton.dataset.results = JSON.stringify(results);
-  }
+  setLastRunPayload({
+    mode: "single-all",
+    scope: "current",
+    label: getCurrentLabel(),
+    results
+  });
 }
 
 /**
  * Handle running a selected diagnostic
  */
 function handleRunSelected() {
-  if (!currentModel) {
-    alert("No model loaded. Please load a WUP file first.");
-    return;
-  }
-
   const selector = document.getElementById("diagnosticSelector");
   const diagnosticKey = selector.value;
 
@@ -181,31 +218,60 @@ function handleRunSelected() {
     return;
   }
 
+  const scope = getSelectedScope();
+  if (scope === "all") {
+    const batch = runSelectedDiagnosticForAll(diagnosticKey);
+    if (!batch) {
+      alert("No loaded WUP models are available for diagnostics.");
+      return;
+    }
+    displayBatchResults(batch);
+    setLastRunPayload(batch);
+    return;
+  }
+
+  if (!currentModel) {
+    alert("No model loaded. Please load a WUP file first.");
+    return;
+  }
+
   const result = runDiagnostic(diagnosticKey, currentModel);
   displaySingleResult(result);
-
-  // Enable save button
-  const saveButton = document.getElementById("saveDiagnostics");
-  if (saveButton) {
-    saveButton.disabled = false;
-    saveButton.dataset.results = JSON.stringify(result);
-  }
+  setLastRunPayload({
+    mode: "single-selected",
+    scope: "current",
+    label: getCurrentLabel(),
+    diagnosticKey,
+    result
+  });
 }
 
 /**
  * Handle saving diagnostic results
  */
 function handleSave() {
-  const saveButton = document.getElementById("saveDiagnostics");
-  if (!saveButton || !saveButton.dataset.results) {
+  if (!lastRunPayload) {
     return;
   }
 
   try {
-    const results = JSON.parse(saveButton.dataset.results);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
     const filename = `diagnostics-${timestamp}.txt`;
-    saveDiagnosticResults(results, filename);
+
+    if (lastRunPayload.mode === "batch-all" || lastRunPayload.mode === "batch-selected") {
+      const content = formatBatchReport(lastRunPayload);
+      downloadText(content, filename);
+      return;
+    }
+
+    if (lastRunPayload.mode === "single-all") {
+      saveDiagnosticResults(lastRunPayload.results, filename);
+      return;
+    }
+
+    if (lastRunPayload.mode === "single-selected") {
+      saveDiagnosticResults(lastRunPayload.result, filename);
+    }
   } catch (err) {
     alert(`Failed to save results: ${err.message}`);
   }
@@ -244,6 +310,69 @@ function displayAllResults(allResults) {
   }
 }
 
+function displayBatchResults(batch) {
+  const container = document.getElementById("diagnosticsResults");
+  if (!container) return;
+
+  container.innerHTML = "";
+  const header = document.createElement("div");
+  header.className = "results-header";
+  const processed = batch.files.filter(file => file.status === "ok").length;
+  const failed = batch.files.length - processed;
+  header.innerHTML = `
+    <h3>${batch.mode === "batch-all" ? "All Diagnostics (All Loaded WUPs)" : "Selected Diagnostic (All Loaded WUPs)"}</h3>
+    <p class="timestamp">Run at: ${new Date(batch.timestamp).toLocaleString()} | Files: ${batch.files.length}, parsed: ${processed}, failed: ${failed}</p>
+  `;
+  container.appendChild(header);
+
+  batch.files.forEach(fileResult => {
+    const card = document.createElement("div");
+    card.className = "diagnostic-section";
+
+    const cardHeader = document.createElement("div");
+    cardHeader.className = "diagnostic-section-header";
+    if (fileResult.status === "ok") {
+      cardHeader.innerHTML = `<h3>${fileResult.label}</h3><p>Parsed successfully</p>`;
+    } else {
+      cardHeader.innerHTML = `<h3>${fileResult.label}</h3><p class="error">Parse failed: ${fileResult.error}</p>`;
+    }
+    card.appendChild(cardHeader);
+
+    if (fileResult.status === "ok") {
+      if (batch.mode === "batch-all") {
+        for (const diagnostic of Object.values(fileResult.results.diagnostics)) {
+          if (diagnostic.success && diagnostic.results) {
+            card.appendChild(createDiagnosticSection(diagnostic));
+          } else {
+            const errorSection = document.createElement("div");
+            errorSection.className = "diagnostic-error";
+            errorSection.innerHTML = `
+              <h4>${diagnostic.name}</h4>
+              <p class="error">${diagnostic.error}</p>
+            `;
+            card.appendChild(errorSection);
+          }
+        }
+      } else {
+        const result = fileResult.result;
+        if (result.success && result.results) {
+          card.appendChild(createDiagnosticSection(result));
+        } else {
+          const errorSection = document.createElement("div");
+          errorSection.className = "diagnostic-error";
+          errorSection.innerHTML = `
+            <h4>${result.name ?? "Diagnostic"}</h4>
+            <p class="error">${result.error ?? "Diagnostic failed."}</p>
+          `;
+          card.appendChild(errorSection);
+        }
+      }
+    }
+
+    container.appendChild(card);
+  });
+}
+
 /**
  * Display results from a single diagnostic
  */
@@ -265,6 +394,149 @@ function displaySingleResult(result) {
     `;
     container.appendChild(errorSection);
   }
+}
+
+function setLastRunPayload(payload) {
+  lastRunPayload = payload;
+  const saveButton = document.getElementById("saveDiagnostics");
+  if (saveButton) {
+    saveButton.disabled = !payload;
+  }
+}
+
+function getSelectedScope() {
+  if (typeof document === "undefined") {
+    return "current";
+  }
+  const selected = document.querySelector("input[name='diagnosticsScope']:checked");
+  return selected?.value === "all" ? "all" : "current";
+}
+
+function getEntriesWithModels() {
+  return loadedEntries.filter(entry => entry && entry.model);
+}
+
+function getCurrentLabel() {
+  const active = loadedEntries.find(entry => entry?.id === activeModelId);
+  if (active?.label) {
+    return active.label;
+  }
+  return window.__lastWupModel?.label ?? "model.wup";
+}
+
+function hydrateCollectionFromSession() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const session = window.__wupSession;
+  if (!session?.getEntries) {
+    return;
+  }
+  loadedEntries = session.getEntries() || [];
+  activeModelId = session.getActiveId?.() ?? activeModelId;
+  const activeEntry = session.getActiveEntry?.();
+  if (activeEntry?.model) {
+    currentModel = activeEntry.model;
+  } else if (window.__lastWupModel?.model) {
+    currentModel = window.__lastWupModel.model;
+  }
+  updateDiagnosticsState();
+}
+
+function runAllLoadedWups() {
+  if (!Array.isArray(loadedEntries) || loadedEntries.length === 0) {
+    return null;
+  }
+
+  return {
+    mode: "batch-all",
+    scope: "all",
+    timestamp: new Date().toISOString(),
+    files: loadedEntries.map(entry => {
+      if (!entry?.model) {
+        return {
+          status: "error",
+          id: entry?.id ?? null,
+          label: entry?.label ?? "unknown.wup",
+          error: entry?.error ?? "Unable to parse file."
+        };
+      }
+      return {
+        status: "ok",
+        id: entry.id,
+        label: entry.label,
+        results: runAllDiagnostics(entry.model)
+      };
+    })
+  };
+}
+
+function runSelectedDiagnosticForAll(diagnosticKey) {
+  if (!Array.isArray(loadedEntries) || loadedEntries.length === 0) {
+    return null;
+  }
+
+  return {
+    mode: "batch-selected",
+    scope: "all",
+    diagnosticKey,
+    timestamp: new Date().toISOString(),
+    files: loadedEntries.map(entry => {
+      if (!entry?.model) {
+        return {
+          status: "error",
+          id: entry?.id ?? null,
+          label: entry?.label ?? "unknown.wup",
+          error: entry?.error ?? "Unable to parse file."
+        };
+      }
+      return {
+        status: "ok",
+        id: entry.id,
+        label: entry.label,
+        result: runDiagnostic(diagnosticKey, entry.model)
+      };
+    })
+  };
+}
+
+function formatBatchReport(batch) {
+  const lines = [];
+  lines.push("Batch WUP Diagnostics Report");
+  lines.push("=".repeat(70));
+  lines.push(`Timestamp: ${batch.timestamp}`);
+  lines.push(`Scope: All loaded WUPs`);
+  lines.push("");
+
+  batch.files.forEach(file => {
+    lines.push(`File: ${file.label}`);
+    lines.push("-".repeat(70));
+
+    if (file.status !== "ok") {
+      lines.push(`ERROR: ${file.error}`);
+      lines.push("");
+      return;
+    }
+
+    if (batch.mode === "batch-all") {
+      lines.push(formatAllDiagnosticsReport(file.results).trim());
+    } else {
+      lines.push(file.result?.textReport?.trim() ?? "Diagnostic result unavailable.");
+    }
+    lines.push("");
+  });
+
+  return `${lines.join("\n")}\n`;
+}
+
+function downloadText(content, filename) {
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -547,23 +819,24 @@ function handleReplaceOutlet(result) {
     const updatedModel = applyOutletReplacement(currentModel, replacement);
     currentModel = updatedModel;
 
-    const label = window.__lastWupModel?.label ?? "model.wup";
-    if (window.__lastWupModel) {
-      window.__lastWupModel.model = updatedModel;
-      window.__lastWupModel.label = label;
-    } else {
-      window.__lastWupModel = { model: updatedModel, label };
-    }
+    const label = getCurrentLabel();
 
-    const editorController = window.__editorController;
-    if (editorController?.setModel) {
-      editorController.setModel(updatedModel, label);
+    const session = window.__wupSession;
+    if (session?.updateActiveModel) {
+      session.updateActiveModel(updatedModel, { label, emitModelEvent: true });
     } else {
       refreshModelInViewer(updatedModel);
     }
 
     const updatedResult = runDiagnostic("outlet", updatedModel);
     displaySingleResult(updatedResult);
+    setLastRunPayload({
+      mode: "single-selected",
+      scope: "current",
+      label,
+      diagnosticKey: "outlet",
+      result: updatedResult
+    });
 
     // Restore the expanded state of check sections
     const newCheckHeaders = document.querySelectorAll(".check-header .expand-toggle");
@@ -580,11 +853,6 @@ function handleReplaceOutlet(result) {
       }
     });
 
-    const saveButton = document.getElementById("saveDiagnostics");
-    if (saveButton) {
-      saveButton.disabled = false;
-      saveButton.dataset.results = JSON.stringify(updatedResult);
-    }
   } catch (err) {
     console.error("Failed to replace legacy outlet:", err);
     alert(`Failed to replace outlet: ${err.message}`);

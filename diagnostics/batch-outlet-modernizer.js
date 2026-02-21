@@ -448,16 +448,27 @@ function displayResults() {
   // Enable/disable download buttons
   downloadAllButton.disabled = filesModified === 0;
   downloadReportButton.disabled = false;
+
+  const downloadLabel = filesModified === 1
+    ? "Descargar Archivo Modificado"
+    : "Descargar ZIP de Archivos Modificados";
+  downloadAllButton.innerHTML = `<span class="icon">⬇</span> ${downloadLabel}`;
 }
 
 /**
- * Download all modified files as a single zip file
+ * Download modified output (single .wup or multi-file .zip)
  */
 function handleDownloadAll() {
   const modifiedFiles = processedResults.filter(r => r.success && r.outletsModernized > 0);
 
   if (modifiedFiles.length === 0) {
     alert("No hay archivos modificados para descargar");
+    return;
+  }
+
+  if (modifiedFiles.length === 1) {
+    const singleFile = modifiedFiles[0];
+    downloadFile(singleFile.modifiedContent, singleFile.filename);
     return;
   }
 

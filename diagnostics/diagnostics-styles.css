@@ -62,7 +62,24 @@
   background: #fafafa;
   border-bottom: 1px solid #e0e0e0;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 12px;
+}
+
+.diagnostics-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-right: auto;
+  font-size: 13px;
+}
+
+.diagnostics-scope label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #333;
 }
 
 .diagnostics-actions button {

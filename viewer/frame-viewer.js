@@ -544,16 +544,34 @@ export class FrameViewer {
     switch (event.key) {
       case "1":
         this.resetViewToFace("pli");
+        this.emitViewHint("Viewing PLI");
         break;
       case "2":
         this.resetViewToFace("pla");
+        this.emitViewHint("Viewing PLA");
         break;
       case "3":
         this.toggleProjectionMode();
+        this.emitViewHint(
+          this.projectionMode === "perspective"
+            ? "Switched to perspective view"
+            : "Switched to orthographic view"
+        );
         break;
       default:
         break;
     }
+  }
+
+  emitViewHint(message) {
+    if (!message || typeof document === "undefined") {
+      return;
+    }
+    document.dispatchEvent(
+      new CustomEvent("viewer:hint", {
+        detail: { message }
+      })
+    );
   }
 
   resizeRenderer() {

@@ -11,11 +11,20 @@
   <div class="app">
     <canvas id="threeCanvas" aria-label="WebGL wall frame visualization"></canvas>
     <div id="threeTooltip" class="tooltip" role="status" aria-live="polite"></div>
+    <div id="viewToast" class="view-toast" role="status" aria-live="polite" aria-atomic="true"></div>
     <button id="toggleMenu" class="menu-toggle" type="button" aria-label="Toggle menu visibility" title="Hide menu">−</button>
     <div class="ui-overlay" role="region" aria-label="Controls and legend">
       <div class="controls">
         <label for="wupFile">Load WUP file:</label>
         <input type="file" id="wupFile" accept=".wup">
+        <label for="wupDirectory">Or load WUP directory:</label>
+        <input type="file" id="wupDirectory" webkitdirectory directory multiple>
+        <section class="loaded-wups" aria-label="Loaded WUP files">
+          <h2>Loaded WUPs</h2>
+          <ul id="loadedWupList" class="loaded-wup-list">
+            <li class="loaded-wup-empty">No WUPs loaded.</li>
+          </ul>
+        </section>
         <button id="toggleProjection" type="button">Switch to perspective view</button>
         <fieldset class="layer-toggles" id="layerControls">
           <legend>Layers</legend>

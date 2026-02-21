@@ -304,7 +304,6 @@ export class EditorController {
     this.state.setDirty(false);
     this.selection.clear();
     this.overlays.clearAll();
-    this.showHudMessage("Loaded model ready for editing.");
 
     this.viewer.updateModel(cloneModel(this.workingModel));
   }
