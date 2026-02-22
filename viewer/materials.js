@@ -26,67 +26,61 @@ function createNailMarkerGeometry() {
 
 export function createMaterialLibrary() {
   const materials = {
-    stud: new THREE.MeshStandardMaterial({ color: 0x3a7bd5, metalness: 0.04, roughness: 0.62 }),
-    blocking: new THREE.MeshStandardMaterial({ color: 0x16a085, metalness: 0.03, roughness: 0.58 }),
-    plate: new THREE.MeshStandardMaterial({
-      color: 0xf39c12,
-      metalness: 0.08,
-      roughness: 0.55,
-      transparent: true,
-      opacity: 0.6,
-      depthWrite: false
-    }),
+    stud: new THREE.MeshStandardMaterial({ color: 0xeae6dd, metalness: 0.0, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+    blocking: new THREE.MeshStandardMaterial({ color: 0xd6d2c4, metalness: 0.0, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+    plate: new THREE.MeshStandardMaterial({ color: 0xcdbba7, metalness: 0.0, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+    edgeLine: new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.15 }),
     sheathing: new THREE.MeshStandardMaterial({
-      color: 0xc49b66,
-      metalness: 0.04,
-      roughness: 0.78,
+      color: 0xf5f0e6,
+      metalness: 0.0,
+      roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
       transparent: true,
       opacity: 0.9,
       side: THREE.DoubleSide
     }),
     nailRow: new THREE.MeshStandardMaterial({
-      color: 0xd35400,
-      metalness: 0.12,
-      roughness: 0.45,
+      color: 0x88929b,
+      metalness: 0.1,
+      roughness: 0.7,
       side: THREE.DoubleSide
     }),
     boyOperation: new THREE.MeshStandardMaterial({
-      color: 0xff6b6b,
-      metalness: 0.1,
-      roughness: 0.5,
+      color: 0xffb6b9,
+      metalness: 0.0,
+      roughness: 0.9,
       transparent: true,
-      opacity: 0.5
+      opacity: 0.6
     }),
     boyArrow: new THREE.MeshStandardMaterial({
-      color: 0xff0000,
-      metalness: 0.3,
-      roughness: 0.4,
+      color: 0xff6b6b,
+      metalness: 0.0,
+      roughness: 0.8,
       transparent: false
     }),
     pafRouting: new THREE.MeshStandardMaterial({
-      color: 0x8e44ad,
-      metalness: 0.16,
-      roughness: 0.48,
+      color: 0xb39bc8,
+      metalness: 0.0,
+      roughness: 0.9,
       transparent: true,
-      opacity: 0.78
+      opacity: 0.8
     }),
     pafOvercutting: new THREE.MeshStandardMaterial({
-      color: 0xff9800,
-      metalness: 0.08,
-      roughness: 0.6,
+      color: 0xf9c8a0,
+      metalness: 0.0,
+      roughness: 0.95,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.4,
       side: THREE.DoubleSide,
       depthWrite: false
     }),
     pafRoutingLine: new THREE.LineBasicMaterial({
-      color: 0xc966ff,  // Brighter, more saturated purple
+      color: 0x9575cd,  // Soft purple
       linewidth: 4,
       transparent: false,
       opacity: 1.0
     }),
     pafRoutingLineDashed: new THREE.LineDashedMaterial({
-      color: 0xc966ff,  // Brighter, more saturated purple
+      color: 0x9575cd,  // Soft purple
       linewidth: 4,
       dashSize: 10,
       gapSize: 5,
@@ -94,10 +88,10 @@ export function createMaterialLibrary() {
       opacity: 1.0
     }),
     pafOvercuttingLine: new THREE.LineBasicMaterial({
-      color: 0xffc107,  // Brighter amber/yellow instead of orange
+      color: 0xffb74d,  // Soft amber
       linewidth: 2,
       transparent: true,
-      opacity: 0.7
+      opacity: 0.8
     }),
     pafCornerRadiusLine: new THREE.LineBasicMaterial({
       color: 0x4caf50,

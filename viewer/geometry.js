@@ -92,6 +92,13 @@ export function createMemberMesh(element, kind, context) {
     depth
   );
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  if (materials && materials.edgeLine) {
+    const edges = new THREE.EdgesGeometry(geometry, 15);
+    const line = new THREE.LineSegments(edges, materials.edgeLine);
+    mesh.add(line);
+  }
   mesh.position.set(centerX, centerY, centerZMm * scale);
   mesh.userData.kind = kind;
   mesh.userData.member = element;
@@ -136,6 +143,13 @@ export function createSheathingMesh(panel, context) {
   geometry.translate(0, 0, -depth / 2);
 
   const mesh = new THREE.Mesh(geometry, materials.sheathing);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  if (materials && materials.edgeLine) {
+    const edges = new THREE.EdgesGeometry(geometry, 15);
+    const line = new THREE.LineSegments(edges, materials.edgeLine);
+    mesh.add(line);
+  }
   const centerZ = computePanelZ(panel, wallThickness, wallSide) * scale;
   mesh.position.set(centroid.x, centroid.y, centerZ);
   mesh.userData.kind = "sheathing";
@@ -205,6 +219,8 @@ export function createNailRowMesh(row, context) {
   const headSizeMm = Math.max(diameterMm * 1.4, 8);
   const markerSizeWorld = headSizeMm * scale;
   const instanced = new THREE.InstancedMesh(nailMarkerGeometry, materials.nailRow, nailCount);
+  instanced.castShadow = true;
+  instanced.receiveShadow = true;
   instanced.frustumCulled = false;
 
   const step = nailCount > 1 ? length / (nailCount - 1) : 0;
@@ -322,6 +338,13 @@ export function createBoyOperationMesh(operation, context) {
 
   const cylinderGeometry = new THREE.CylinderGeometry(radiusWorld, radiusWorld, depthWorld, 24);
   const cylinderMesh = new THREE.Mesh(cylinderGeometry, materials.boyOperation);
+  cylinderMesh.castShadow = true;
+  cylinderMesh.receiveShadow = true;
+  if (materials && materials.edgeLine) {
+    const edges = new THREE.EdgesGeometry(cylinderGeometry, 15);
+    const line = new THREE.LineSegments(edges, materials.edgeLine);
+    cylinderMesh.add(line);
+  }
   group.add(cylinderMesh);
 
   const arrowShaftRadius = radiusWorld * 0.08;
@@ -331,9 +354,13 @@ export function createBoyOperationMesh(operation, context) {
 
   const shaftGeometry = new THREE.CylinderGeometry(arrowShaftRadius, arrowShaftRadius, arrowShaftLength, 12);
   const shaftMesh = new THREE.Mesh(shaftGeometry, materials.boyArrow);
+  shaftMesh.castShadow = true;
+  shaftMesh.receiveShadow = true;
 
   const coneGeometry = new THREE.ConeGeometry(arrowConeRadius, arrowConeHeight, 12);
   const coneMesh = new THREE.Mesh(coneGeometry, materials.boyArrow);
+  coneMesh.castShadow = true;
+  coneMesh.receiveShadow = true;
 
   if (direction >= 0) {
     const shaftEndY = depthWorld / 2 - arrowConeHeight;
@@ -1302,6 +1329,8 @@ function createPafSegmentMesh(segment, routing, context) {
   const geometry = new THREE.CylinderGeometry(radiusWorld, radiusWorld, depthWorld, 32);
   geometry.rotateX(Math.PI / 2);
   const mesh = new THREE.Mesh(geometry, materials.pafRouting);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   mesh.position.set(worldPoint.x, worldPoint.y, centerZMm * scale);
 
   mesh.userData.kind = "paf";
@@ -1357,6 +1386,8 @@ function createPafSegmentMesh(segment, routing, context) {
     );
     overcutGeometry.rotateX(Math.PI / 2);
     const overcutMesh = new THREE.Mesh(overcutGeometry, materials.pafOvercutting);
+  overcutMesh.castShadow = true;
+  overcutMesh.receiveShadow = true;
     overcutMesh.position.set(worldPoint.x, worldPoint.y, centerZMm * scale);
 
     group.add(overcutMesh);
@@ -2033,6 +2064,13 @@ function createPafPolygonMesh(segment, routing, context) {
     });
     extrudeGeometry.translate(0, 0, -depthWorld / 2);
     volumeMesh = new THREE.Mesh(extrudeGeometry, materials.pafRouting);
+    volumeMesh.castShadow = true;
+    volumeMesh.receiveShadow = true;
+    if (materials && materials.edgeLine) {
+      const edges = new THREE.EdgesGeometry(extrudeGeometry, 15);
+      const line = new THREE.LineSegments(edges, materials.edgeLine);
+      volumeMesh.add(line);
+    }
     volumeMesh.position.set(centroid.x, centroid.y, centerZMm * scale);
     volumeMesh.renderOrder = 1;
   }

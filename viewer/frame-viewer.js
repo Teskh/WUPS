@@ -29,9 +29,13 @@ export class FrameViewer {
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xf1f4f9);
+    this.scene.background = new THREE.Color(0xe8ecef);
 
     this.perspectiveFov = 36;
     this.wallDir = 1;
@@ -43,12 +47,26 @@ export class FrameViewer {
     this.controls = null;
     this.modelOffsets = null;
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x48505a, 0.85);
-    this.scene.add(hemiLight);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Soft fill
+    this.scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-    dirLight.position.set(1.5, 2.5, 3.5);
-    this.scene.add(dirLight);
+    const keyLight = new THREE.DirectionalLight(0xfffaed, 1.5); // Warm sun/key
+    keyLight.position.set(20, 30, 20); // Further away for more parallel rays
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.width = 4096; // Crisp shadows
+    keyLight.shadow.mapSize.height = 4096;
+    keyLight.shadow.camera.near = 0.5;
+    keyLight.shadow.camera.far = 100;
+    keyLight.shadow.camera.left = -15;
+    keyLight.shadow.camera.right = 15;
+    keyLight.shadow.camera.top = 15;
+    keyLight.shadow.camera.bottom = -15;
+    keyLight.shadow.bias = -0.0001;
+    this.scene.add(keyLight);
+
+    const fillLight = new THREE.DirectionalLight(0xddeeff, 0.5); // Cool fill
+    fillLight.position.set(-20, 10, -20);
+    this.scene.add(fillLight);
 
     this.modelGroup = new THREE.Group();
     this.scene.add(this.modelGroup);
