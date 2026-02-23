@@ -668,6 +668,40 @@ export class FrameViewer {
       return;
     }
 
+    const previousViewState = (() => {
+      if (!this.camera) {
+        return null;
+      }
+      const target = this.controls?.target?.clone?.() ?? new THREE.Vector3(0, 0, 0);
+      const position = this.camera.position.clone();
+      const distance = position.distanceTo(target);
+      const direction = position.clone().sub(target);
+      if (direction.lengthSq() > 0) {
+        direction.normalize();
+      } else {
+        direction.set(0, 0, 1);
+      }
+      let visibleHalfHeight = null;
+      if (this.camera.isPerspectiveCamera) {
+        const fovRadians = THREE.MathUtils.degToRad(this.camera.fov / 2);
+        visibleHalfHeight = Math.tan(fovRadians) * Math.max(distance, 0.0001);
+      } else if (this.camera.isOrthographicCamera) {
+        const orthoHeight = Math.abs(this.camera.top - this.camera.bottom);
+        const zoom = Math.max(this.camera.zoom || 1, 0.0001);
+        visibleHalfHeight = (orthoHeight / 2) / zoom;
+      }
+      return {
+        fromMode: this.projectionMode,
+        target,
+        position,
+        quaternion: this.camera.quaternion.clone(),
+        zoom: typeof this.camera.zoom === "number" ? this.camera.zoom : null,
+        distance,
+        direction,
+        visibleHalfHeight
+      };
+    })();
+
     const aspect = this.getCanvasAspect();
     let newCamera;
     if (targetMode === "orthographic") {
@@ -692,18 +726,71 @@ export class FrameViewer {
     }
 
     this.camera = newCamera;
-    this.camera.position.set(0, 0, this.cachedDimensions.cameraDistance);
     this.camera.up.set(0, 1, 0);
 
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.configureControls();
 
     this.projectionMode = targetMode;
-    if (this.camera.isOrthographicCamera) {
-      this.camera.zoom = 1;
+    if (previousViewState?.distance) {
+      this.cachedDimensions.cameraDistance = previousViewState.distance;
     }
+
     this.updateCameraProjection();
-    this.positionCameraForFace(this.activeFace);
+
+    if (previousViewState) {
+      if (targetMode === "perspective" && previousViewState.visibleHalfHeight != null) {
+        const fovRadians = THREE.MathUtils.degToRad(this.perspectiveFov / 2);
+        const mappedDistance = previousViewState.visibleHalfHeight / Math.tan(fovRadians);
+        const safeDistance = Math.max(mappedDistance, 0.0001);
+        this.cachedDimensions.cameraDistance = safeDistance;
+        this.updateCameraProjection();
+        this.camera.position.copy(
+          previousViewState.target.clone().add(previousViewState.direction.clone().multiplyScalar(safeDistance))
+        );
+      } else {
+        this.camera.position.copy(previousViewState.position);
+      }
+
+      this.camera.quaternion.copy(previousViewState.quaternion);
+
+      if (this.controls) {
+        this.controls.target.copy(previousViewState.target);
+      }
+
+      if (targetMode === "orthographic") {
+        const baseHalfHeight = Math.abs(this.camera.top - this.camera.bottom) / 2;
+        if (previousViewState.visibleHalfHeight != null && baseHalfHeight > 0) {
+          this.camera.zoom = Math.max(baseHalfHeight / previousViewState.visibleHalfHeight, 0.0001);
+        } else if (typeof previousViewState.zoom === "number") {
+          this.camera.zoom = previousViewState.zoom;
+        } else {
+          this.camera.zoom = 1;
+        }
+      }
+
+      this.camera.updateProjectionMatrix();
+      if (this.controls) {
+        this.controls.update();
+        // OrbitControls update can alter orientation; restore exact view.
+        this.camera.position.copy(
+          targetMode === "perspective" && previousViewState.visibleHalfHeight != null
+            ? previousViewState.target.clone().add(
+              previousViewState.direction.clone().multiplyScalar(this.cachedDimensions.cameraDistance)
+            )
+            : previousViewState.position
+        );
+        this.camera.quaternion.copy(previousViewState.quaternion);
+      }
+      this.requestRender();
+    } else {
+      if (this.camera.isOrthographicCamera) {
+        this.camera.zoom = 1;
+      }
+      this.camera.position.set(0, 0, this.cachedDimensions.cameraDistance);
+      this.positionCameraForFace(this.activeFace);
+    }
+
     this.notifyProjectionModeChange();
   }
 
