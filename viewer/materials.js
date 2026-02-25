@@ -26,16 +26,16 @@ function createNailMarkerGeometry() {
 
 export function createMaterialLibrary() {
   const materials = {
-    stud: new THREE.MeshStandardMaterial({ color: 0xeae6dd, metalness: 0.0, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
-    blocking: new THREE.MeshStandardMaterial({ color: 0xd6d2c4, metalness: 0.0, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
-    plate: new THREE.MeshStandardMaterial({ color: 0xcdbba7, metalness: 0.0, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+    stud: new THREE.MeshStandardMaterial({ color: 0xc8d2dd, metalness: 0.0, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+    blocking: new THREE.MeshStandardMaterial({ color: 0xb8c6be, metalness: 0.0, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+    plate: new THREE.MeshStandardMaterial({ color: 0xaebfce, metalness: 0.0, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
     edgeLine: new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.15 }),
     sheathing: new THREE.MeshStandardMaterial({
-      color: 0xf5f0e6,
+      color: 0xe0b98b,
       metalness: 0.0,
       roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.84,
       side: THREE.DoubleSide
     }),
     nailRow: new THREE.MeshStandardMaterial({
