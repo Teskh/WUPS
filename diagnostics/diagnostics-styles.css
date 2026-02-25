@@ -213,6 +213,23 @@
   .diagnostic-section-header { background: rgba(255, 255, 255, 0.02); }
 }
 
+.diagnostic-file-card {
+  position: relative;
+  overflow: visible;
+}
+
+.diagnostic-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  background: var(--surface-solid);
+  box-shadow: 0 1px 0 var(--border-color);
+}
+
+.diagnostic-file-header p {
+  margin-bottom: 0;
+}
+
 .diagnostic-section-header h3 {
   margin: 0 0 0.5rem 0;
   font-size: 1rem;

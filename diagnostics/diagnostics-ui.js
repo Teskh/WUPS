@@ -294,7 +294,9 @@ function displayAllResults(allResults) {
   `;
   container.appendChild(header);
 
-  for (const [key, diagnostic] of Object.entries(allResults.diagnostics)) {
+  const diagnosticsInOrder = Object.values(allResults.diagnostics).sort(compareDiagnosticsByFailures);
+
+  for (const diagnostic of diagnosticsInOrder) {
     if (diagnostic.success && diagnostic.results) {
       const section = createDiagnosticSection(diagnostic);
       container.appendChild(section);
@@ -327,10 +329,10 @@ function displayBatchResults(batch) {
 
   batch.files.forEach(fileResult => {
     const card = document.createElement("div");
-    card.className = "diagnostic-section";
+    card.className = "diagnostic-section diagnostic-file-card";
 
     const cardHeader = document.createElement("div");
-    cardHeader.className = "diagnostic-section-header";
+    cardHeader.className = "diagnostic-section-header diagnostic-file-header";
     if (fileResult.status === "ok") {
       cardHeader.innerHTML = `<h3>${fileResult.label}</h3><p>Parsed successfully</p>`;
     } else {
@@ -340,7 +342,8 @@ function displayBatchResults(batch) {
 
     if (fileResult.status === "ok") {
       if (batch.mode === "batch-all") {
-        for (const diagnostic of Object.values(fileResult.results.diagnostics)) {
+        const diagnosticsInOrder = Object.values(fileResult.results.diagnostics).sort(compareDiagnosticsByFailures);
+        for (const diagnostic of diagnosticsInOrder) {
           if (diagnostic.success && diagnostic.results) {
             card.appendChild(createDiagnosticSection(diagnostic));
           } else {
@@ -559,8 +562,16 @@ function createDiagnosticSection(diagnostic) {
   `;
   section.appendChild(header);
 
-  // Create checklist for each check type
-  diagnostic.results.checks.forEach(check => {
+  const sortedChecks = [...diagnostic.results.checks].sort((a, b) => {
+    const aFailed = getFailedCountForCheck(a);
+    const bFailed = getFailedCountForCheck(b);
+    if (aFailed === 0 && bFailed > 0) return 1;
+    if (aFailed > 0 && bFailed === 0) return -1;
+    return bFailed - aFailed;
+  });
+
+  // Create checklist for each check type (failed checks first)
+  sortedChecks.forEach(check => {
     const checkSection = createCheckSection(check);
     section.appendChild(checkSection);
   });
@@ -603,7 +614,12 @@ function createCheckSection(check) {
   const resultsList = document.createElement("ul");
   resultsList.className = "check-results-list";
 
-  check.results.forEach(result => {
+  const sortedResults = [...check.results].sort((a, b) => {
+    if (!!a.passed === !!b.passed) return 0;
+    return a.passed ? 1 : -1;
+  });
+
+  sortedResults.forEach(result => {
     const item = document.createElement("li");
     item.className = `check-result-item ${result.passed ? 'passed' : 'failed'}`;
 
@@ -740,6 +756,18 @@ function createCheckSection(check) {
   });
 
   return checkDiv;
+}
+
+function getFailedCountForCheck(check) {
+  return Array.isArray(check?.results) ? check.results.filter(result => !result.passed).length : 0;
+}
+
+function compareDiagnosticsByFailures(a, b) {
+  const aFailed = Number.isFinite(a?.results?.summary?.failed) ? a.results.summary.failed : (a?.success ? 0 : 1);
+  const bFailed = Number.isFinite(b?.results?.summary?.failed) ? b.results.summary.failed : (b?.success ? 0 : 1);
+  if (aFailed === 0 && bFailed > 0) return 1;
+  if (aFailed > 0 && bFailed === 0) return -1;
+  return bFailed - aFailed;
 }
 
 /**
